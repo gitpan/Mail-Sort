@@ -1,0 +1,27 @@
+Mail::Sort is yet another module intended to enable the writing of
+mail filters in the style of procmail(1). It was written when I
+realized that the previous entries (Mail::Audit(3) and
+Mail::Procmail(3)), while trying to emphasize elegance and brevity,
+sacrificed a good deal of procmail's flexibility and power.
+
+First and foremost, both of these existing modules only allow for
+matching a single header at a time, throwing away procmail's TO_
+feature (or any equivalent way of using a non-trivial regexp to match
+a header tag). This really hurts when you try to match mailing lists
+and spam list headers. Second, while I sympathize with the choice of
+procedural interface with global variables in Mail::Procmail (way too
+much of Perl code out there uses object-oriented syntax for no good
+reason whatsoever), in the present case it means that the message
+cannot be modified and then fed into another instance of the filter,
+again a limitation in comparison to procmail.
+
+Mail::Sort is meant to end the history of this particular area by
+matching procmail's features 1-1.
+
+For distribution terms, read the file COPYING.
+
+-- 
+Ian Zimmerman, Oakland, California, U.S.A.  <itz@speakeasy.org>
+The easiest way to win an argument: ridicule your opponent's basic
+assumptions by stating their negation and postfixing it with ", right?"
+GPG pub key: 433BA087 9C0F 194F 203A 63F7 B1B8 6E5A 8CA3 27DB 433B A087

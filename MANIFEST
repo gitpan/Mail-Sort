@@ -1,0 +1,7 @@
+COPYING
+GPL
+MANIFEST
+Makefile.PL
+README
+Sort.pod
+lib/Mail/Sort.pm

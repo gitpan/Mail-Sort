@@ -1,0 +1,529 @@
+# $Id: Sort.pod,v 1.15 2001/10/28 19:34:13 itz Exp $
+=pod
+
+=head1 NAME
+
+Mail::Sort - split incoming mail according to header matching conditions
+
+=head1 SYNOPSIS
+
+ use Mail::Sort;
+
+ $sort = new Mail::Sort(test => 0, 
+                        logfile => "$ENV{HOME}/sortlog",
+                        loglevel => 2);
+ $spool = "$ENV{HOME}/Mail";
+
+ $sort->lock("$ENV{HOME}/one_at_a_time_please");
+
+ $sort->unlock("$ENV{HOME}/one_at_a_time_please");
+
+ $sort->deliver("| formail >> $spool/junk")
+        if $sort->header_match('from', 'spammer');
+
+ $sort->deliver("| formail >> $spool/work", keep => 1)
+        if $sort->destination_address('me@work.com');
+
+ $sort->deliver("| formail >> $spool/list", label => 'cool list')
+        if $sort->sender_match('owner-coollist@lists.r.us');
+
+ $sort->forward("boss@work.com")
+        if $sort->header_match('subject', 'accept credit cards');
+
+ $sort->ignore()
+        if grep { $_ =~ /make money/ } @{$sort->{body}};
+
+ exit(TEMPFAIL);
+
+=head1 DESCRIPTION
+
+Mail::Sort is yet another module intended to enable the writing
+of mail filters in the style of L<procmail(1)>.  It was written when
+I realized that the previous entries (L<Mail::Audit(3)> and
+L<Mail::Procmail(3)>), while trying to emphasize elegance and brevity,
+sacrificed a good deal of B<procmail>'s flexibility and power.
+
+First and foremost, both of these existing modules only allow for
+matching a single header at a time, throwing away B<procmail>'s TO_
+feature (or any equivalent way of using a non-trivial regexp to match
+a header tag).  This really hurts when you try to match mailing lists
+and spam list headers.  Second, while I sympathize with the choice of
+procedural interface with global variables in Mail::Procmail (way too
+much of Perl code out there uses object-oriented syntax for no good
+reason whatsoever), in the present case it means that the message
+cannot be modified and then fed into another instance of the filter,
+again a limitation in comparison to B<procmail>.
+
+Mail::Sort is meant to end the history of this particular area by
+matching B<procmail>'s features 1-1.  The (remaining) exceptions are
+noted under L</"BUGS">.
+
+=head1 EXPORTS
+
+=over
+
+=item TEMPFAIL
+
+The constant to use as exit status when mail cannot be delivered.
+MTAs such as L<sendmail(8)> depend on this to queue the mail for a
+later delivery attempt.  You should almost always end your filter
+script with
+
+ exit TEMPFAIL;
+
+=item DELIVERED
+
+The constant to use as exit status when mail is successfully
+delivered.  This tells the MTA that all is well and it can dequeue the
+mail.  Note that the delivery methods of Mail::Sort already call
+
+ exit DELIVERED;
+
+internally, so there's usually no need to use this constant in filter
+scripts.
+
+=back
+
+=head1 CONSTRUCTORS
+
+=over
+
+=item $sort = new Mail::Sort(test => I<test>, logfile => I<logfile>, loglevel => I<loglevel>, lockwait => I<lockwait>, locktries => I<locktries>, callback => I<callback>, envelope_from => I<envelope_from>);
+
+creates a new Mail::Sort object after reading a mail message from
+F<stdin>.  I<test> is a boolean; when set, any delivery methods
+subsequently called on the returned object will perform simulated
+delivery only (destination mailboxes are not modified, although they
+are still locked I<and> opened).  I<logfile> is the name of a file
+where delivery and matching methods record their activity, or a
+pre-made FileHandle reference for the same purpose.  However,
+this logging only occurs if the I<level> of each particular log output
+is less than or equal to I<loglevel>.  The following I<level> values
+are used by convention:
+
+=over
+
+=item errors (delivery aborted with TEMPFAIL) => 0
+
+=item warnings (delivery continues) => 1
+
+=item delivery records (lists commands/mailboxes used) => 2
+
+=item successful header matches => 3
+
+=item user defined log records (see log() under L</"METHODS">) => 4
+
+=back
+
+I<lockwait> is the interval in seconds between retries while waiting
+for a lock to become available (default 5), and I<locktries> is the
+total number of retries before giving up (default 10).  I<callback>,
+if provided, should be a reference to a subroutine expecting 2
+arguments.  The subroutine will be called after each unsuccessful
+locking try, with the lockfile name and the number of tries so far as
+arguments.  
+
+The constructor inspects the first line of the message to determine if
+it is in the 'From ' format traditionally used to delimit messages in
+Unix mailbox files.  If it is, it sets the I<envelope_from> attribute
+of the new object accordingly.  This can, however, be overriden by
+supplying the equally named parameter to the constructor.
+
+=item
+
+=item $sort = new Mail::Sort(I<fh>, test => I<test>, logfile => I<logfile>, loglevel => I<loglevel>, lockwait => I<lockwait>, locktries => I<locktries>, callback => I<callback>, envelope_from => I<envelope_from>);
+
+This alternative form of the constructor reads a mail message from the FileHandle I<fh>
+instead of F<stdin>.
+
+=item $sort = new Mail::Sort(I<arrayref>, test => I<test>, logfile => I<logfile>, loglevel => I<loglevel>, lockwait => I<lockwait>, locktries => I<locktries>, callback => I<callback>, envelope_from => I<envelope_from>);
+
+This alternative form of the constructor reads a mail message from the array reference
+I<arrayref> instead of a filehandle.
+
+=item $sort = new Mail::Sort(I<obj>, test => I<test>, logfile => I<logfile>, loglevel => I<loglevel>, lockwait => I<lockwait>, locktries => I<locktries>, callback => I<callback>, envelope_from => I<envelope_from>);
+
+This alternative form of the constructor omits the reading of a mail
+message from F<stdin> and instead it accepts I<obj>, a reference to a
+ready-made L<Mail::Internet(3)> object.  This is meant to support a
+style where the message (obtained as described in {obj} under
+L</"ATTRIBUTES">) is modified by user-supplied Perl code, then fed
+back into the filter.
+
+=back
+
+=head1 METHODS
+
+=over
+
+=item @matches = $sort->header_match(I<tag>, I<pattern>, I<context>);
+
+The header_match method greps through the message headers, looking for
+a header line whose tag matches I<tag> and whose content matches
+I<pattern>, after leading I<context>.  I<tag>, I<pattern>, I<context>
+are Perl regular expressions; I<pattern>, I<context> are optional with
+natural defaults, so this can also be used to simply retrieve a
+particular header.  The matching is case-insensitive unless I<tag>
+contains an uppercase ASCII letter.  The method returns a list of all
+matching header lines (note that multi-line headers are automatically
+unfolded).
+
+=item $match = $sort->match_group(I<index>);
+
+match_group returns the string that matched the appropriate
+parenthetical group in I<pattern> at the last call to header_match (or
+any of the header matching methods that follow and are based on it).
+For example:
+
+ @matches = $sort->header_start('from',
+                                '(daemon|server)\@localhost');
+ # sets $which to 'daemon' or 'server'
+ $which = $sort->match_group(1);
+
+Some caveats are in order.  First, if multiple headers match and are
+returned from header_start (that can only happen if you use a
+nontrivial regexp for the tag, or use one of the following methods
+that do that behind your back), the last matching header wins and sets
+the match groups.  Second, if you have groups in I<tag> or I<context>,
+you must use the (?:) syntax, otherwise they become part of the total
+match and their contents will be returned by match_group.
+
+=item @matches = $sort->header_start(I<tag>, I<pattern>);
+
+This method returns the list of headers whose contents I<start> with
+I<pattern>.  The call above is exactly equivalent to
+
+ @matches = $sort->header_match($tag, $pattern, '\s*');
+
+=item @matches = $sort->destination_match(I<pattern>, I<context>);
+
+This method returns the list of matching I<destination> headers.  The
+call above is exactly equivalent to
+
+ @matches = $sort->header_match(
+ '(?:(?:original-)?(?:resent-)?(?:to|cc|bcc)|'
+ .'(?:x-envelope|apparently(?:-resent)?)-to)',
+ $pattern, $context);
+
+=item @matches = $sort->destination_address(I<address>);
+
+This method returns the list of headers with matching 
+I<destination addresses>.  
+It corresponds to B<procmail>'s TO_ construct.  The call
+above is exactly equivalent to
+
+ @matches = $sort->destination_match(
+ $address, '(?:.*[^-a-z0-9_.])?');
+
+=item @matches = $sort->destination_word(I<word>);
+
+This method returns the list of headers with matching 
+I<destination words>.  
+It corresponds to B<procmail>'s TO construct.  The call
+above is exactly equivalent to
+
+ @matches = $sort->destination_match($word, '(?:.*[^a-z])?');
+
+=item @matches = $sort->sender_match(I<pattern>, I<context>);
+
+This method returns the list of matching I<sender> headers.  
+It is intended mostly to help with matching mail from lists.
+The call above is exactly equivalent to
+
+ @matches = $sort->header_match(
+ '(?:(?:resent-)?sender|resent-from|return-path)',
+ $pattern, $context);
+
+=item $sort->log(I<level>, I<what>, I<label>);
+
+Logs a record into the logfile (that is, if I<level> is at most that
+passed to the constructor).  If the optional I<label> is present, it
+is prepended to the record.  The Mail::Sort matching and delivery
+methods call this internally to record their actions, but it can also
+be called directly by the user to produce customized logging.
+
+=item $sort->lock(I<lockfile>);
+
+Attempts to atomically create I<lockfile> (using
+L<open(2)>); exits with TEMPFAIL unless successful.
+
+The
+Mail::Sort delivery methods call this internally to lock the
+destination mailbox, if applicable; but it can also be called directly
+by the user, either to produce a I<global> lock (one that mutually
+serializes any two instances of the filter), or to temporarily lock a
+destination mailbox where the necessity of this cannot be deduced
+automatically. 
+
+=item $sort->unlock(I<lockfile>);
+
+This just calls L<unlink(2)> on I<lockfile>.
+
+Locks are NOT automatically released when a filter process exits,
+because this leads to conceptual difficulties with L<fork(2)>.
+However, such functionality may be provided in a future version.
+
+=item $sort->deliver(I<target>, keep => I<keep>, lockfile => I<lockfile>, label => I<label>);
+
+Delivers the message to I<target>.  I<target> is any string suitable
+for open(); thus this method can 
+
+=over
+
+=item 1. 
+
+Create and write a new file containing a single message
+(ie. L<maildir(5)> style delivery).
+
+=item 2. 
+
+Append the message to an existing file.  Note that in this case I<no>
+Unix style From processing is done; Mail::Sort is not a kitchen sink.
+For delivery to Unix mboxes, use the next option with a
+program that does From processing and escaping (eg. L<formail(1)>).
+Sometimes you can even configure the MTA to do From escaping before is
+passes the mail to the MDA; but this setup is offensive to purists, as
+the From line (and the necessary escaping it entails) has nothing to
+do with the message itself and everything to do with one MUA-specific
+file format (the Unix mbox).
+
+=item 3.
+
+Feed the message to a pipe.  Currently, the other end of the pipe must
+be an external command.  See L</"BUGS">.
+
+=back
+
+This method tries to automatically perform any necessary locking.
+This applies in case 2. above (always), and in case 3. when the output
+from the pipe is itself appended to a file.  Both cases are handled
+the same way: if I<target> contains the substring '>>', the following
+sequence of non-whitespace characters is interpreted as the
+destination filename, and a lockfile is created whose name is the
+destination filename with '.lock' appended.  This is the algorithm
+used by B<procmail> to implement its :0 : construct, if its
+documentation can be trusted. 
+
+The automatically provided lockfile (or its absence) can be overriden
+by providing the argument I<lockfile>.
+
+This method logs a record of the delivery at I<loglevel> 2; if
+I<label> is present, it's made part of the record, as described above.
+
+Unless I<keep> is true, this method exits with status DELIVERED
+upon successful completion.  
+
+=item $sort->forward(I<target>, keep => I<keep>, label => I<label>);
+
+Forwards the message to the Internet address I<target>.  This is
+almost exactly equivalent to
+
+ $sort->deliver("| $Config::Config{sendmail} $target",
+ keep => $keep, label => $label);
+
+except that on on many systems $Config{sendmail} isn't set, including
+ones where B<sendmail(8)> is in use.
+
+This method logs a record of the delivery at I<loglevel> 2; if
+I<label> is present, it's made part of the record, as described above.
+
+Unless I<keep> is true, this method exits with status DELIVERED
+upon successful completion.  
+
+=item $sort->ignore(I<label>);
+
+Trashes the message in the bit bucket for eternity.  This is exactly
+equivalent to
+
+ $sort->deliver("| $Config::Config{cat} >/dev/null",
+ label => $label);
+
+This method logs a record of the delivery (such as it is) at
+I<loglevel> 2; if I<label> is present, it's made part of the record,
+as described above.
+
+This method exits with status DELIVERED
+upon successful completion.  
+
+=item $from = $sort->make_from_line();
+
+Returns a fresh automatically generated Unix style From line, with the
+envelope sender and current local time.
+
+=back
+
+=head1 ATTRIBUTES
+
+=over
+
+=item $mail = $sort->{obj};
+
+The obj attribute is a reference to a L<Mail::Internet(3)> object that
+represents the original message.  After retrieving it you can apply
+any transformation to the message through the Mail::Internet
+interface, and then possibly create a new Mail::Sort object from the
+transformed message.
+
+=item @headers = @{$sort->{head}};
+
+The head attribute is a reference to an array of message headers.
+These headers are the ones used for the matching methods; they are
+I<unfolded> so that each header occupies exactly one line.  Therefore,
+they can be different from the original headers, and they shouldn't be
+used if you manually deliver or forward the message; use the obj
+attribute for that.
+
+=item @body = @{$sort->{body}};
+
+The body attribute represents the message body.  It is a reference to
+an array of body lines.  In contrast to the head attribute, no
+transformation is applied to the body lines; in particular, no
+folding, unfolding, or From escaping.
+
+=item $from = $sort->{envelope_from};
+
+The envelope_from attribute is a string normally set according to the
+original message's 'From ' line.  It is useful for deliveries to Unix
+mailboxes or to the L<formail(1)> filter.
+
+=back
+
+=head1 FILES
+
+F</dev/stderr> - default log file
+
+=head1 SEE ALSO
+
+L<procmail(1)>, L<procmailrc(5)>, L<Mail::Audit(3)>,
+L<Mail::Procmail(3)>, L<sendmail(8)>, L<Mail::Internet(3)>,
+L<open(2)>, L<fork(2)>, L<maildir(5)>, L<formail(1)>
+
+=head1 DIAGNOSTICS
+
+These are the messages logged with I<loglevel> 0 or 1.
+
+=over
+
+=item lockfile I<lockfile> creation failed: I<system error message>
+
+What is says.  I<loglevel> 0; delivery is not attempted beyond this
+point.  The most likely cause is insufficient privilege to create
+files in the target directory.  See L</"BUGS"> for one common case.
+
+=item cannot create lockfile I<lockfile> after I<tries> tries
+
+The lock() method timed out because the lockfile already existed.
+Most likely this is a stale lockfile left over from an errant process
+that needs to be removed manually.
+
+=item cannot deliver to I<target>: I<system error message>
+
+What is says.  I<loglevel> 0; delivery is not attempted beyond this
+point.  The most likely cause is insufficient privilege to write the
+target file.
+
+=item delivery subprocess exited with status I<exit status>
+
+This can only occur when delivering to a pipe.  I<loglevel> 0;
+delivery is not attempted beyond this point.  The particular value of
+I<exit status> is of some import; if I<exit status> E<lt> 256, the
+subprocess probably received a fatal signal (though this is
+architecture-dependent). 
+
+=item I<arg> is not a valid key for new Mail::Sort::new
+
+What it says.  I<loglevel> 1; delivery continues.
+
+=item I<arg> is not a valid key for new Mail::Sort::deliver
+
+What it says.  I<loglevel> 1; delivery continues.
+
+=item I<arg> is not a valid key for new Mail::Sort::forward
+
+What it says.  I<loglevel> 1; delivery continues.
+
+=back
+
+=head1 BUGS
+
+Mail::Sort uses dotlocking for all its
+locking needs.  This presents a slight problem with delivery to the
+main system spool, on systems (like Debian) where the mail spool is
+not world-writable.  The obvious way:
+
+ $sort->deliver(">>/var/mail/$ENV{LOGNAME}");
+
+won't work.  There are two answers to this:
+
+=over
+
+=item 1.
+
+Simply don't use the system spool at all.  There's nothing that forces
+you to.  All reasonably modern components of the mail puzzle can be
+told (each in their own way) to use a file in your home directory
+instead.
+
+=item 2.
+
+If you're trying this module, you've probably been using B<procmail>
+until now.  So, the stylish solution is
+
+ $sort->deliver("| procmail -d $ENV{LOGNAME} /dev/null");
+
+No explicit locking is necessary in this case, because B<procmail>
+knows how to do that itself, and has been installed with the required
+privileges to do that (one hopes).  The F</dev/null> in the above
+command tells B<procmail> to ignore any configuration files, not to
+trash your mail.
+
+=back
+
+
+There's currently no built-in way to set up bidirectional
+communication between the filter and a destination pipe, and thus no
+equivalent to B<procmail>'s :0 f: construct.  This can be done from
+the filter itself using L<IPC::Open2(3)>, but it would be nice to have
+a native API for it.  It will be added in a future version.
+
+What the Camel Book terms "Talking to yourself" is currently not
+possible, that is, the following won't work:
+
+ $sort->deliver("|-", label => 'talking to myself');
+
+Some way of doing this will be provided in a future version.
+
+Mail::Sort has no built-in filename magic; there's no equivalent of
+B<procmail> constructs like ORGMAIL or MAILDIR.  The author considers
+this a feature.  In a general-purpose language like Perl, it is
+trivial to do these things from the filter script itself.  The real
+bug is the inclusion of this paragraph in the BUGS section. :-)
+
+Mail::Sort is somewhat Unix-centric; it probably won't be useful
+without modification on systems where concepts such as MTA, mail
+queue, and .forward files don't make sense.  The author doesn't
+consider this a feature, but he doesn't quite apologize for it,
+either.
+
+=head1 AUTHOR
+
+Ian Zimmerman <S<itz@speakeasy.org>>
+
+=head1 HISTORY
+
+B<procmail> by Stephen R. van den Berg <S<srb@cuci.nl>> is the
+granddaddy and original inspiration for this code, and remains the
+best general-purpose mail filter around, in this writer's opinion.
+
+Mail::Audit by Simon Cozens <S<simon@brecon.co.uk>> is a Perl module
+with a B<procmail>-like interface, based on some earlier code by Tom
+Christiansen <S<tchrist@jhereg.perl.com>>.  Unfortunately,
+Mail::Audit's interface seems to suffer from the overuse of
+object-oriented style, while also restricting the possible ways of
+header matching.
+
+Mail::Procmail by Johan Vromans <S<jvromans@squirrel.nl>> reverts to a
+simple procedural interface, but in doing so flushes the baby out
+together with the water: it is no longer possible to modify the
+original message and continue running the filter on the modified
+message. 
