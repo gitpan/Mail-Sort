@@ -1,4 +1,4 @@
-#$Id: log.t,v 1.2 2001/09/13 05:52:14 itz Exp $
+#$Id: log.t,v 1.2 2001/09/13 05:52:14 itz Exp itz $
 
 use Test;
 
@@ -46,7 +46,7 @@ if ($pid) {
     #child
     my @logs = <STDIN>;
     my $pid = getppid();
-    my $log_regexp = "^[A-Z][a-z][a-z]\\s+[0-9][0-9]\\s+[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\\s+\\[$pid\\]\\s+";
+    my $log_regexp = "^[[:alpha:]][[:lower:]][[:lower:]]\\s+[[:digit:]][[:digit:]]\\s+[[:digit:]][[:digit:]]:[[:digit:]][[:digit:]]:[[:digit:]][[:digit:]]\\s+\\[$pid\\]\\s+";
     ok($#logs, 5);
     ok($logs[0] =~ /${log_regexp}blah$/);
     ok($logs[1] =~ /${log_regexp}\(argh\)\s+eeek$/);

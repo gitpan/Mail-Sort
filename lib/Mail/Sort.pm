@@ -1,4 +1,4 @@
-# $Id: Sort.pm,v 1.23 2002/03/21 08:08:17 itz Exp $
+# $Id: Sort.pm,v 1.26 2002/03/23 00:36:08 itz Exp $
 
 package Mail::Sort;
 
@@ -7,7 +7,7 @@ package Mail::Sort;
 
 no warnings qw(digit);
 
-$VERSION = '$Date: 2002/03/21 08:08:17 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
+$VERSION = '$Date: 2002/03/23 00:36:08 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
 
 
 use FileHandle 2.00;
@@ -244,7 +244,7 @@ sub deliver {
         ($arg, $val) = (shift, shift);
     }
     
-    $self->log(2, "delivering to $target", $label);
+    $self->log(2, "delivering to $target ; keep = $keep", $label);
     if ($lockfile) {
         $self->lock($lockfile);
     }
@@ -279,6 +279,8 @@ sub deliver {
     return 1;
 }
 
+@Mail::Sort::sendmails = ('/usr/sbin/sendmail', '/usr/lib/sendmail');
+
 sub forward {
     my ($self, $target) = (shift, shift);
     my $keep = 0;
@@ -303,14 +305,29 @@ sub forward {
     # a required part of the system).  Let's try it both ways.
 
     if ($Config{sendmail}) {
-        return $self->deliver('| '.$Config{sendmail}." $target",
-                              label => $label, keep => $keep);
+        return $self->deliver('| '.$Config{sendmail}." -i $target",
+                              keep => $keep, label => $label);
     } else {
-        $self->log(2, "smtp forwarding to $target", $label);
-        my $status = 1;
-        $status = scalar($self->{obj}->smtpsend(To => $target)) unless $self->{test};
-        exit ($status ? DELIVERED : TEMPFAIL) unless $keep;
-        return $status;
+        #arrrgh, exactly as I feared, some systems don't have either the
+        #config variable or SMTP.  Like my tester's system :-(
+        my $real_sendmail = undef;
+      SENDMAIL:
+        foreach my $maybe_sendmail (@Mail::Sort::sendmails) {
+            if (-x $maybe_sendmail) {
+                $real_sendmail = $maybe_sendmail;
+                last SENDMAIL;
+            }
+        }
+        if ($real_sendmail) {
+            return $self->deliver('| '.$real_sendmail." -i $target",
+                                  keep => $keep, label => $label);
+        } else {
+            $self->log(2, "smtp forwarding to $target", $label);
+            my $status = 1;
+            $status = scalar($self->{obj}->smtpsend(To => $target)) unless $self->{test};
+            exit ($status ? DELIVERED : TEMPFAIL) unless $keep;
+            return $status;
+        }
     }
 
 }
