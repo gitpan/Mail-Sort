@@ -1,4 +1,4 @@
-# $Id: Sort.pm,v 1.49 2003/03/14 17:13:14 itz Exp $
+# $Id: Sort.pm,v 1.54 2003/03/18 17:13:21 itz Exp $
 
 package Mail::Sort;
 
@@ -7,7 +7,7 @@ package Mail::Sort;
 
 no warnings qw(digit);
 
-$VERSION = '$Date: 2003/03/14 17:13:14 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
+$VERSION = '$Date: 2003/03/18 17:13:21 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
 
 
 use FileHandle 2.00;
@@ -21,192 +21,155 @@ use constant DELIVERED	=> 0;
 use strict;
 use v5.6.0;
 
+our %signo = do { my $i = 0; map {$_, $i++} split(' ', $Config{sig_name}) };
+
+# Where is sendmail?  $Config{sendmail} cannot be relied on - on my
+# machine the Perl binary package maintainer set it to '', even though
+# there is a perfectly good /usr/sbin/sendmail (and it is in fact a
+# required part of the system).  Let's try it both ways.
+
+our ($sendmail) = grep -x, ($Config{sendmail}, '/usr/sbin/sendmail', '/usr/lib/sendmail');
+
+our %objkeys = map {$_, 1} qw(test logfile loglevel lockwait locktries callback envelope_from);
+
+sub _copy_from_array {
+    my $self = shift;
+    if ( $_[0] =~ m( ^From\s+(\S+) )x ) {
+        $self->{envelope_from} = $1;
+        shift;
+    }
+    $self->{obj} = new Mail::Internet(\@_, Modify => 0) or exit TEMPFAIL;
+}
+
 sub new {
+    my $self = { };
     my $class = shift;
 
-    my $self     =  {
-        test     => 0,
-        logfile  => '/dev/null',
-        loglevel => 1,
-        lockwait => 5,
-        locktries => 10,
-        callback => undef,
-        envelope_from => "$ENV{LOGNAME}\@localhost",
-        };
-
-    bless $self, $class;
-    
-    my $fh;
-    if (ref $_[0] eq 'Mail::Internet') {
-        $self->{obj} = shift;
-    } elsif (ref $_[0] eq 'ARRAY') {
-        my @copy = @{$_[0];};    # stupid Mail::Internet clobbers input array!
-        shift;
-        if ($copy[0] =~ /^From\s+(\S+)/) {
-            $self->{envelope_from} = $1;
-            shift @copy;
+    for (ref $_[0]) {
+        /^Mail::Internet/ and $self->{obj} = shift, last;
+        /^ARRAY/          and &_copy_from_array($self, @{shift @_}), last;
+        /^FileHandle/     and &_copy_from_array($self, shift->getlines), last;
+        my $fh = new FileHandle;
+        if (!$fh->fdopen(0, '<')) {
+            $self->log(0, "$!");
+            exit TEMPFAIL;
         }
-        $self->{obj} = new Mail::Internet(\@copy, Modify => 0) or exit TEMPFAIL;
-    } else {
-        if (ref $_[0] eq 'FileHandle') {
-            $fh = shift;
-        } else {
-            $fh = new FileHandle;
-            if (!$fh->fdopen(0, '<')) {
-                $self->log(0, "$!");
-                exit TEMPFAIL;
-            }
-        }
-        my @copy = $fh->getlines();
-        if ($copy[0] =~ /^From\s+(\S+)/) {
-            $self->{envelope_from} = $1;
-            shift @copy;
-        }
-        $self->{obj} = new Mail::Internet(\@copy, Modify => 0) or exit TEMPFAIL;
+        &_copy_from_array($self, $fh->getlines);
     }
-    
-  VAL:
-    while (1) {
+
+  VAL:    
+    while(1) {
         my ($arg, $val) = splice(@_, 0, 2);
-        last VAL unless defined $val;
-        if (!exists $self->{$arg}) {
-             $self->log(1, "$arg is not a valid key for new Mail::Sort::new");
-        } else {
-            $self->{$arg} = $val;
-        }
+        defined $val or last VAL;
+        $self->{$arg} = $val, next VAL if $objkeys{$arg};
+        &log($self, 1, "$arg is not a valid key for new Mail::Sort::new");
     }
 
-    $self->{signo} = { };
-    my $i = 0;
-    foreach my $n (split(' ', $Config{sig_name})) {
-        $self->{signo}->{$n} = $i;
-        $i++;
-    }
+    $self->{'logfile'} ||= '/dev/null';
+    $self->{'loglevel'} ||= 1;
+    $self->{'lockwait'} ||= 5;
+    $self->{'locktries'} ||= 10;
+    $self->{'envelope_from'} ||= "$ENV{LOGNAME}\@localhost";
     
     my $head = $self->{obj}->head->dup(); # create a dup because we'll modify this one
     $head->modify(0);
     $head->unfold();
     $self->{head} = $head->header;
-
     $self->{body} = $self->{obj}->body;
-
+    $self->{all_matches} = [ ];
     $self->{matches} = [ ];
-    return $self;
+    $self->{_sendmail} = $sendmail;
+    $self->{_signo} = \%signo;
+    bless $self, $class;
 }
 
 sub _save_match {
-    my ($self, $line, $pat, $fold) = @_;
-    my $ok = 0;
-    if (($fold and $line =~ /$pat/i)
-        or (!$fold and $line =~ /$pat/)) {
-        $ok = 1;
-        no strict 'refs';
-        for (my $i = 1; $i < 50; $i++) {
-            if (defined $$i) {
-                $self->{matches}->[$i] = $$i;
-            } else {
-                $self->{matches}->[$i] = undef;
-            }
-        }
-    } 
-    $ok;
+    my ($self, $line) = @_;
+    $self->log(3, $line, 'header match');
+    my @matches = ( );
+    for (my $i = 0; $i <= $#-; $i++) {
+        $matches[$i] = substr($line, $-[$i], $+[$i] - $-[$i]) if defined $-[$i];
+    }
+    push @{$self->{all_matches}}, \@matches;
+    1;
 }
 
 sub header_match {
     my ($self, $tag, $pattern, $context) = @_;
-    $self->{matches} = [ ];
-    if (!defined $pattern) { $pattern = ''; }
-    if (!defined $context) { $context = '.*'; }
-    my @match;
-    if ($tag =~ /[A-Z]/ ) {
-        @match = grep {$self->_save_match($_,"^$tag:$context$pattern", 0)} @{$self->{head}};
-    } else {
-        @match = grep {$self->_save_match($_,"^$tag:$context$pattern", 1)} @{$self->{head}};
-    }
-    if (@match) {
-        foreach my $m (@match) {
-            my $chomped = $m;
-            chomp $chomped;
-            $self->log(3, $chomped, 'header match');
-        }
-    }
-    return @match;
+    defined $context or $context = '.*';
+    defined $pattern or $pattern = '' ;
+    $tag = '(?i)' . $tag unless $tag =~ m( [A-Z] )x;
+    my $rx = qr(^$tag:$context$pattern);
+
+    $self->{all_matches} = [ ];
+    my @lines = grep { /$rx/ and &_save_match($self, $_) } @{$self->{head}};
+    $self->{matches} = $self->{all_matches}->[$#lines];
+    @lines;
 }
 
 sub match_group {
     my ($self, $index) = @_;
-    return $self->{matches}->[$index];
+    $self->{matches}->[$index];
 }
 
 sub header_start {
     my ($self, $tag, $pattern) = @_;
-    return $self->header_match($tag, $pattern, '\s*');
+    $self->header_match($tag, $pattern, '\s*');
 }
-
-our $dest_regexp =
-    '(?:(?:original-)?(?:resent-)?(?:to|cc|bcc)|(?:x-envelope|apparently(?:-resent)?)-to)';
 
 sub destination_match {
     my ($self, $pattern, $context) = @_;
-    return $self->header_match($dest_regexp, $pattern, $context);
+    $self->header_match
+        ('(?:(?:original-)?(?:resent-)?(?:to|cc|bcc)|(?:x-envelope|apparently(?:-resent)?)-to)',
+         $pattern, $context);
 }
 
 sub destination_address {
     my ($self, $address) = @_;
-    return $self->destination_match($address, '(?:.*[^-a-z0-9_.])?');
+    $self->destination_match($address, '(?:.*[^-a-z0-9_.])?');
 }
 
 sub destination_word {
     my ($self, $word) = @_;
-    return $self->destination_match($word, '(?:.*[^a-z])?');
+    $self->destination_match($word, '(?:.*[^a-z])?');
 }
-
-our $sender_regexp =
-    '(?:(?:resent-)?sender|resent-from|return-path)';
 
 sub sender_match {
     my ($self, $pattern, $context) = @_;
-    return $self->header_match($sender_regexp, $pattern, $context); 
+    $self->header_match
+        ('(?:(?:resent-)?sender|resent-from|return-path)',
+         $pattern, $context); 
 }
 
 sub log {
     my ($self, $level, $what, $label) = @_;
     chomp $what;
-    if ($label) {
-        $what = '('.$label.') '.$what;
-    }
-    return unless $self->{logfile} and $level <= $self->{loglevel};
+    ($self->{logfile} and $level <= $self->{loglevel}) or return;
+
+    $self->{_logfh} = ref $self->{logfile} eq 'FileHandle' ?
+        $self->{logfile} : new FileHandle('>>'.$self->{logfile})
+        unless exists $self->{_logfh};
 
     if (!defined $self->{_logfh}) {
-        if (ref $self->{logfile} eq 'FileHandle') {
-            $self->{_logfh} = $self->{logfile};
-        } else {
-            $self->{_logfh} = new FileHandle('>>'.$self->{logfile});
-        }
-        if (!defined $self->{_logfh}) {
-            warn "$!";
-            exit TEMPFAIL;
-        }
+        warn "$!";
+        exit TEMPFAIL;
     }
     
-    my $blurb = &strftime('%b %d %H:%M:%S', (localtime())).' ['.$$.'] '.$what."\n";
-    $self->{_logfh}->print($blurb);
+    $self->{_logfh}->print(&strftime('%b %d %H:%M:%S', (localtime())),' [', $$ ,'] ');
+    $self->{_logfh}->print('(', $label,') ') if $label;
+    $self->{_logfh}->print($what, "\n");
 }
 
 sub lock {
     my ($self, $lockfile) = @_;
-    my $lock = POSIX::open($lockfile, POSIX::O_CREAT|POSIX::O_EXCL, 0444);
-    my $tries = 1;
+    my $lock;
   CREAT:
-    while ((!defined $lock) and ($tries < $self->{locktries})) {
+    for (my $tries = 1; $tries <= $self->{locktries}; $tries++) {
+        $lock = POSIX::open($lockfile, POSIX::O_CREAT|POSIX::O_EXCL, 0444);
+        last CREAT if defined $lock;
         if ($! == POSIX::EEXIST) {
-            if ($self->{callback}) {
-                &{$self->{callback}}($lockfile, $tries);
-            }
+            &{$self->{callback}}($lockfile, $tries) if $self->{callback};
             sleep($self->{lockwait});
-            $lock = POSIX::open($lockfile, POSIX::O_CREAT|POSIX::O_EXCL, 0444);
-            $tries += 1;
-            next CREAT;
         } else {
             $self->log(0, "lockfile $lockfile creation failed: $!");
             exit TEMPFAIL;
@@ -228,150 +191,100 @@ sub unlock {
 
 sub deliver {
     my ($self, $target) = splice(@_, 0, 2);
-    my $keep = 0;
-    my $lockfile = '';
-    my $label = undef;
-
-    if ($target =~ />>\s*(\S+)/ ) {
-        my $subtarget = $1;
-        $lockfile = $subtarget.'.lock';
-    }
+    my ($keep, $lockfile, $label);
+    $target =~ m( >>\s*(\S+) )x and $lockfile = $1 . '.lock';
 
   VAL:
     while (1) {
         my ($arg, $val) = splice(@_, 0, 2);
-        last VAL unless defined $val;
-        if ($arg eq 'keep') { $keep = $val; }
-        elsif ($arg eq 'lockfile') { $lockfile = $val; }
-        elsif ($arg eq 'label') { $label = $val; }
-        else { $self->log(1, "$arg is not a valid key for Mail::Sort::deliver"); }
+        defined $val or last VAL;
+        for ($arg) {
+            /^keep/		and $keep = $val,	next VAL;
+            /^lockfile/         and $lockfile = $val,   next VAL;
+            /^label/            and $label = $val,      next VAL;
+            $self->log(1, "$arg is not a valid key for Mail::Sort::deliver");
+        }
     }
     
     $self->log(2, "delivering to $target", $label);
-    if ($lockfile) {
-        $self->lock($lockfile);
-    }
+    $self->lock($lockfile) if ($lockfile);
 
-    my $write_st = undef;
-  CATCH_PIPE:
-    {
-        local $? ;                  # make sure to get status of fh->close() below 
-        local $SIG{PIPE} = 'IGNORE';
-        my $fh = new FileHandle($target);
-        if (!$fh) {
-            $self->log(0, "cannot deliver to $target: $!");
-            $write_st = 0;
-        } else {
-            $self->{obj}->print($fh) unless $self->{test};
-            $fh->close();
-            if ($? and (not WIFSIGNALED($?)
-                        or (WIFSIGNALED($?) and WTERMSIG($?) != $self->{signo}->{PIPE}))) {
-                $self->log(0, "delivery subprocess exited with status $?");
-                $write_st = 0;
-            } else {
-                $write_st = 1;
-            };
-        };
-    };
-
-    $self->unlock($lockfile) if $lockfile;
-
-    if (!$write_st) {
-        exit TEMPFAIL unless $keep;
-        return 0;
+    my $write_st = 1;
+    my $fh = new FileHandle($target);
+    if (!$fh) {
+        $self->log(0, "cannot deliver to $target: $!");
+        $write_st = 0;
     } else {
-        exit DELIVERED unless $keep;
-        return 1;
-    };
+        local ($SIG{PIPE}, $?) = 'IGNORE'; # make sure to get status of fh->close() below 
+        $write_st = $self->{obj}->print($fh) unless $self->{test};
+        $fh->close();
+        if ($? and (not WIFSIGNALED($?) or WTERMSIG($?) != $self->{_signo}->{PIPE})) {
+            $self->log(0, "delivery subprocess exited with status $?");
+            $write_st = 0;
+        }
+    }
+    $self->unlock($lockfile) if $lockfile;
+    exit ($write_st ? DELIVERED : TEMPFAIL) unless $keep;
+    $write_st;
 }
-
-@Mail::Sort::sendmails = ('/usr/sbin/sendmail', '/usr/lib/sendmail');
 
 sub forward {
     my ($self, $target) = splice(@_, 0, 2);
-    my $keep = 0;
-    my $label = undef;
+    my ($keep, $label);
 
   VAL:
     while (1) {
         my ($arg, $val) = splice(@_, 0, 2);
-        last VAL unless defined $val;
-        if ($arg eq 'keep') { $keep = $val; }
-        elsif ($arg eq 'label') { $label = $val; }
-        else { $self->log(1, "$arg is not a valid key for Mail::Sort::forward"); }
-    }
-
-    # hmmm, we have a dilemma here.  we could send the message using
-    # the Mail::Internet smtpsend method, but there may actually not
-    # be a smtp listener on localhost (there often isn't on
-    # dialup-hooked machines, unless people use fetchmail).  Or we
-    # could pipe to sendmail or any of its clones, but where is
-    # sendmail?  $Config{sendmail} cannot be relied on - on my machine
-    # the Perl binary package maintainer set it to '', even though
-    # there is a perfectly good /usr/sbin/sendmail (and it is in fact
-    # a required part of the system).  Let's try it both ways.
-
-    if ($Config{sendmail}) {
-        return $self->deliver('| '.$Config{sendmail}." -i $target",
-                              keep => $keep, label => $label);
-    } else {
-        #arrrgh, exactly as I feared, some systems don't have either the
-        #config variable or SMTP.  Like my tester's system :-(
-        my $real_sendmail = undef;
-      SENDMAIL:
-        foreach my $maybe_sendmail (@Mail::Sort::sendmails) {
-            if (-x $maybe_sendmail) {
-                $real_sendmail = $maybe_sendmail;
-                last SENDMAIL;
-            }
-        }
-        if ($real_sendmail) {
-            return $self->deliver('| '.$real_sendmail." -i $target",
-                                  keep => $keep, label => $label);
-        } else {
-            $self->log(2, "smtp forwarding to $target", $label);
-            my $status = 1;
-            $status = scalar($self->{obj}->smtpsend(To => $target)) unless $self->{test};
-            exit ($status ? DELIVERED : TEMPFAIL) unless $keep;
-            return $status;
+        defined $val or last VAL;
+        for ($arg) {
+            /^keep/		and $keep = $val, next VAL;
+            /^label/            and $label = $val, next VAL;
+            $self->log(1, "$arg is not a valid key for Mail::Sort::forward");
         }
     }
+    return $self->deliver(join('','| ', $self->{_sendmail}," -i $target"),
+                          keep => $keep, label => $label) if $self->{_sendmail};
 
+    $self->log(2, "smtp forwarding to $target", $label);
+    my $status = $self->{test} or scalar($self->{obj}->smtpsend(To => $target));
+    exit ($status ? DELIVERED : TEMPFAIL) unless $keep;
+    $status;
 }
 
 sub ignore {
     my ($self, $label) = @_;
-    $self->deliver('| '.$Config{cat}.' > /dev/null', label => $label); # literally :-)
+    $self->deliver(join('','| ', $Config{cat},' > /dev/null'),
+                   label => $label); # literally :-)
 }
 
 sub make_from_line {
     my $self = $_[0];
-    return "$self->{envelope_from} " . &POSIX::strftime('%a %b %d %H:%M:%S %Y', localtime);
+    "$self->{envelope_from} " . &POSIX::strftime('%a %b %d %H:%M:%S %Y', localtime);
 }
 
 # various junk matching recipes
 sub fake_received {
     my $self = $_[0];
-    return ($self->header_match('received', '\[[[0-9.]*([03-9][0-9][0-9]|2[6-9][0-9]|25[6-9])') or
-            $self->header_match('Received', 'from Unknown/Local') or
-            $self->header_match('received', 'unknown host') or
-            $self->header_match('Received', 'from HOST') or
-            $self->header_match('Received', 'HELO HOST'));
+    $self->header_match('received', '\[[[0-9.]*([03-9][0-9][0-9]|2[6-9][0-9]|25[6-9])')
+        or $self->header_match('Received', 'from Unknown/Local')
+        or $self->header_match('received', 'unknown host')
+        or $self->header_match('Received', 'from HOST')
+        or $self->header_match('Received', 'HELO HOST');
 }
 
 sub missing_required {
     my $self = $_[0];
-    return (!$self->header_match('from') or !$self->header_match('date'));
+    !$self->header_match('from') or !$self->header_match('date');
 }
 
 sub invalid_date {
     my $self = $_[0];
-    return (!$self->header_match('date','(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), )?[0-3 ]?[0-9] (?:Jan|Feb|Ma[ry]|Apr|Ju[nl]|Aug|Sep|Oct|Nov|Dec) (?:[12][901])?[0-9]{2} [0-2][0-9](?:\:[0-5][0-9]){1,2} (?:[+-][0-9]{4}|UT|[A-Z]{2,3}T)(?:\s+\(.*\))?'));
+    !$self->header_match('date','(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), )?[0-3 ]?[0-9] (?:Jan|Feb|Ma[ry]|Apr|Ju[nl]|Aug|Sep|Oct|Nov|Dec) (?:[12][901])?[0-9]{2} [0-2][0-9](?:\:[0-5][0-9]){1,2} (?:[+-][0-9]{4}|UT|[A-Z]{2,3}T)(?:\s+\(.*\))?');
 }
 
 sub overflow_attempt {
     my $self = $_[0];
-    return $self->header_match('received',
+    $self->header_match('received',
 '.....................................................\
 ..........................................................................\
 ..........................................................................\
@@ -390,111 +303,110 @@ sub overflow_attempt {
 
 sub bad_x_uidl {
     my $self = $_[0];
-    return ($self->header_match('x-uidl') and
-            !$self->header_start('x-uidl',"[ 	]*[0-9a-f]+[ 	]*\$"));
+    $self->header_match('x-uidl')
+        and !$self->header_start('x-uidl',"[ 	]*[0-9a-f]+[ 	]*\$");
 }
 
 sub oceanic_date {
     my $self = $_[0];
-    return ($self->header_match('(date|received)','-0600 \(EST\)')
-            or $self->header_match('date','[-+](?:1[4-9]\d\d|[2-9]\d\d\d)'));
+    $self->header_match('(date|received)','-0600 \(EST\)')
+        or $self->header_match('date','[-+](?:1[4-9]\d\d|[2-9]\d\d\d)');
 }
 
 sub empty_header {
     my $self = $_[0];
-    return $self->header_start('(from|to|reply-to)', "[ 	]*[<>]*[ 	]*\$");
+    $self->header_start('(from|to|reply-to)', "[ 	]*[<>]*[ 	]*\$");
 }
 
 sub visible_bcc {
     my $self = $_[0];
-    return $self->header_match('bcc');
+    $self->header_match('bcc');
 }
 
 sub eight_bit_header {
     my $self = $_[0];
-    return ($self->header_match('(from|subject)','[\x80-\xff][\x80-\xff][\x80-\xff][\x80-\xff]'));
+    $self->header_match('(from|subject)','[\x80-\xff][\x80-\xff][\x80-\xff][\x80-\xff]');
 }
 
 sub faraway_charset {
     my $self = shift;
-    my $joined = join '|', @_ ;
-    my $charsets_rx = '(' . $joined . ')';
-    return ($self->header_start('(from|subject)','=\?' . $charsets_rx . '\?')
-            or $self->header_match('content-type','charset="' . $charsets_rx . '"'));
+    my $charsets_rx = '(' . join('|', @_) . ')';
+    $self->header_start('(from|subject)',join('','=\?', $charsets_rx, '\?'))
+        or $self->header_match('content-type',join('','charset="', $charsets_rx, '"'));
 }
 
 sub asian_origin {
     my $self = $_[0];
-    return ($self->eight_bit_header() or $self->faraway_charset('iso-?2022-?jp', 'gb-?2312'));
+    $self->eight_bit_header() or $self->faraway_charset('iso-?2022-?jp', 'gb-?2312');
 }
 
 sub no_message_id {
     my $self = $_[0];
-    return (not $self->header_start('message-id',"\\s*<\\s*[^> ][^>]*\\s*>\\s*(\\(added by [^<>()]+\\)\\s*)?\$"));
+    not $self->header_start('message-id',"\\s*<\\s*[^> ][^>]*\\s*>\\s*(\\(added by [^<>()]+\\)\\s*)?\$");
 }
 
 sub strange_mime {
     my $self = $_[0];
-    return ($self->header_match('MiME-Version'));
+    $self->header_match('MiME-Version');
 }
 
 sub subject_free_caps {
     my $self = $_[0];
-    return $self->header_match('Subject', '\bFREE\b');
+    $self->header_match('Subject', '\bFREE\b');
 }
 
 sub subject_all_caps {
    my $self = $_[0];
-   return (!$self->header_match('Subject','[a-z]'));
+   not $self->header_match('Subject','[a-z]');
 }
 
 sub subject_has_spaces {
     my $self = $_[0];
-    return ($self->header_match('subject','( {6}|[\t])\S'));
+    $self->header_match('subject','( {6}|[\t])\S');
 }
 
 sub too_many_recipients {
     my ($self, $limit) = @_;
-    return ($self->destination_match("(,.*){$limit}"));
+    $self->destination_match("(,.*){$limit}");
 }
 
 sub html_only {
     my $self = $_[0];
-    return $self->header_match('content-type','text/html');
+    $self->header_match('content-type','text/html');
 }
 
 sub address_as_realname {
     my $self = $_[0];
-    return $self->header_start('"([^"@]+\@[^"@]+)"\s+<\1>');
+    $self->header_start('"([^"@]+\@[^"@]+)"\s+<\1>');
 }
 
 sub base64_text {
     my $self = $_[0];
-    return ($self->header_match('content-type','text/plain')
-            and $self->header_match('content-transfer-encoding','base64'));
+    $self->header_match('content-type','text/plain')
+        and $self->header_match('content-transfer-encoding','base64');
 }
 
 sub missing_mimeole {
     my $self = $_[0];
-    return ($self->header_match('x-msmail-priority')
-            # squirrelmail seems to insert this header, so make an exception for it
-            and not $self->header_match('x-mailer','squirrelmail')
-            and not $self->header_match('x-mimeole'));
+    $self->header_match('x-msmail-priority')
+        # squirrelmail seems to insert this header, so make an exception for it
+        and not $self->header_match('x-mailer','squirrelmail')
+        and not $self->header_match('x-mimeole');
 }
 
 sub msgid_spam_chars {
     my $self = $_[0];
-    return ($self->header_match('message-id','[:}{,!\/]'));
+    $self->header_match('message-id','[:}{,!\/]');
 }
 
 sub from_ends_in_digit {
     my $self = $_[0];
-    return ($self->header_match('from','\d\@'));
+    $self->header_match('from','\d\@');
 }
 
 sub received_by_smtpd32 {
     my $self = $_[0];
-    return ($self->header_match('received','smtpd32'));
+    $self->header_match('received','smtpd32');
 }
 
 # razor integration
@@ -512,7 +424,7 @@ sub razor_check {
     my $reply = $client->check(sigs => [$hash]);
     defined $reply && return $reply->[0];
     $self->log(1, "razor check failed: $Razor::Client::errstr");
-    return 0;
+    0;
 }
 
 # spamassassin integration
@@ -528,9 +440,9 @@ sub spamassassin_check {
     my @hits = split /\s*,\s*/, $status->get_names_of_tests_hit();
     my $report = $status->get_report();
     my %hitlist = ('total' => $total);
-    foreach my $hit (@hits) {
-        $report =~ m{\n\s*SPAM:\s*$hit\s*\((-?[0-9]+\.[0-9]+)} ;
-        $hitlist{$hit} = $1;
+    foreach (@hits) {
+        $report =~ m( \n\s*SPAM:\s*$_\s*\((-?[0-9]+\.[0-9]+) )x ;
+        $hitlist{$_} = $1;
     }
     $status->finish();
     return \%hitlist;
