@@ -1,4 +1,4 @@
-# $Id: Sort.pm,v 1.26 2002/03/23 00:36:08 itz Exp $
+# $Id: Sort.pm,v 1.30 2002/04/01 08:31:33 itz Exp $
 
 package Mail::Sort;
 
@@ -7,7 +7,7 @@ package Mail::Sort;
 
 no warnings qw(digit);
 
-$VERSION = '$Date: 2002/03/23 00:36:08 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
+$VERSION = '$Date: 2002/04/01 08:31:33 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
 
 
 use FileHandle 2.00;
@@ -244,39 +244,42 @@ sub deliver {
         ($arg, $val) = (shift, shift);
     }
     
-    $self->log(2, "delivering to $target ; keep = $keep", $label);
+    $self->log(2, "delivering to $target", $label);
     if ($lockfile) {
         $self->lock($lockfile);
     }
-    local $? ;                  # make sure to get status of fh->close() below 
-    my $fh = new FileHandle($target);
-    if (!$fh) {
-        $self->unlock($lockfile) if $lockfile;
-        $self->log(0, "cannot deliver to $target: $!");
-        exit TEMPFAIL unless $keep;
-        return 0;
-    }
-    eval {
-        local $SIG{PIPE} = sub { die 'just a SIGPIPE'; };
-        $self->{obj}->print($fh);
-    } unless $self->{test};
-    $fh->close();
+
+    my $write_st = undef;
+  CATCH_PIPE:
+    {
+        local $? ;                  # make sure to get status of fh->close() below 
+        local $SIG{PIPE} = 'IGNORE';
+        my $fh = new FileHandle($target);
+        if (!$fh) {
+            $self->log(0, "cannot deliver to $target: $!");
+            $write_st = 0;
+        } else {
+            $self->{obj}->print($fh) unless $self->{test};
+            $fh->close();
+            if ($? and (not WIFSIGNALED($?)
+                        or (WIFSIGNALED($?) and WTERMSIG($?) != $self->{signo}->{PIPE}))) {
+                $self->log(0, "delivery subprocess exited with status $?");
+                $write_st = 0;
+            } else {
+                $write_st = 1;
+            };
+        };
+    };
+
     $self->unlock($lockfile) if $lockfile;
 
-    if ($@ and $@ ne 'just a SIGPIPE') {
-        $self->log(0, "cannot deliver to $target: $@");
+    if (!$write_st) {
         exit TEMPFAIL unless $keep;
         return 0;
-    }
-    if ($? and (not WIFSIGNALED($?)
-                or (WIFSIGNALED($?) and WTERMSIG($?) != $self->{signo}->{PIPE}))) {
-        $self->log(0, "delivery subprocess exited with status $?");
-        exit TEMPFAIL unless $keep;
-        return 0;
-    }
-
-    exit DELIVERED unless $keep;
-    return 1;
+    } else {
+        exit DELIVERED unless $keep;
+        return 1;
+    };
 }
 
 @Mail::Sort::sendmails = ('/usr/sbin/sendmail', '/usr/lib/sendmail');

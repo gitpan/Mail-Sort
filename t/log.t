@@ -1,4 +1,4 @@
-#$Id: log.t,v 1.2 2001/09/13 05:52:14 itz Exp itz $
+#$Id: log.t,v 1.3 2002/03/29 07:23:52 itz Exp $
 
 use Test;
 
@@ -13,6 +13,7 @@ use FileHandle 2.00;
        "X-Multiline: line one\n",
        " line two\n",
        "To: you_vous_Vy\@nowhere.one.org\n",
+       "Subject: logging test\n",
        "Sender: my_own_list\@nowhere.two.org\n",
        "\n",
        "From Myself, blah blah blah, this is a really stupid test message.\n",
@@ -33,7 +34,7 @@ if ($pid) {
 
     $pipe->flush();
 
-    $sort = new Mail::Sort(\@data, test => 1, logfile => $pipe, loglevel => 3);
+    $sort = new Mail::Sort(\@data, logfile => $pipe, loglevel => 3);
     $sort->log(4, 'ouch');
 
     #some real logs now
@@ -46,7 +47,7 @@ if ($pid) {
     #child
     my @logs = <STDIN>;
     my $pid = getppid();
-    my $log_regexp = "^[[:alpha:]][[:lower:]][[:lower:]]\\s+[[:digit:]][[:digit:]]\\s+[[:digit:]][[:digit:]]:[[:digit:]][[:digit:]]:[[:digit:]][[:digit:]]\\s+\\[$pid\\]\\s+";
+    my $log_regexp = "^[A-Z][a-z][a-z]\\s+[0-9][0-9]\\s+[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\\s+\\[$pid\\]\\s+";
     ok($#logs, 5);
     ok($logs[0] =~ /${log_regexp}blah$/);
     ok($logs[1] =~ /${log_regexp}\(argh\)\s+eeek$/);

@@ -1,4 +1,4 @@
-#$Id: deliver.t,v 1.3 2001/10/25 23:42:25 itz Exp $
+#$Id: deliver.t,v 1.4 2002/03/29 05:09:44 itz Exp $
 
 use Test;
 
@@ -14,6 +14,7 @@ use Config;
        "X-Multiline: line one\n",
        " line two\n",
        "To: you_vous_Vy\@nowhere.one.org\n",
+       "Subject: deliver test\n",
        "Sender: my_own_list\@nowhere.two.org\n",
        "\n",
        "From Myself, blah blah blah, this is a really stupid test message.\n",
