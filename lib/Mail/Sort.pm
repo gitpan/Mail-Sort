@@ -1,4 +1,4 @@
-# $Id: Sort.pm,v 1.48 2002/11/21 21:20:18 itz Exp $
+# $Id: Sort.pm,v 1.49 2003/03/14 17:13:14 itz Exp $
 
 package Mail::Sort;
 
@@ -7,7 +7,7 @@ package Mail::Sort;
 
 no warnings qw(digit);
 
-$VERSION = '$Date: 2002/11/21 21:20:18 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
+$VERSION = '$Date: 2003/03/14 17:13:14 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
 
 
 use FileHandle 2.00;
@@ -65,14 +65,15 @@ sub new {
         $self->{obj} = new Mail::Internet(\@copy, Modify => 0) or exit TEMPFAIL;
     }
     
-    my ($arg, $val) = (shift, shift);
-    while (defined $arg and defined $val) {
-        if (!grep { $_ eq $arg } (keys %{$self})) {
+  VAL:
+    while (1) {
+        my ($arg, $val) = splice(@_, 0, 2);
+        last VAL unless defined $val;
+        if (!exists $self->{$arg}) {
              $self->log(1, "$arg is not a valid key for new Mail::Sort::new");
         } else {
             $self->{$arg} = $val;
         }
-        ($arg, $val) = (shift, shift);
     }
 
     $self->{signo} = { };
@@ -226,7 +227,7 @@ sub unlock {
 }
 
 sub deliver {
-    my ($self, $target) = (shift, shift);
+    my ($self, $target) = splice(@_, 0, 2);
     my $keep = 0;
     my $lockfile = '';
     my $label = undef;
@@ -236,13 +237,14 @@ sub deliver {
         $lockfile = $subtarget.'.lock';
     }
 
-    my ($arg, $val) = (shift, shift);
-    while (defined $arg and defined $val) {
+  VAL:
+    while (1) {
+        my ($arg, $val) = splice(@_, 0, 2);
+        last VAL unless defined $val;
         if ($arg eq 'keep') { $keep = $val; }
         elsif ($arg eq 'lockfile') { $lockfile = $val; }
         elsif ($arg eq 'label') { $label = $val; }
         else { $self->log(1, "$arg is not a valid key for Mail::Sort::deliver"); }
-        ($arg, $val) = (shift, shift);
     }
     
     $self->log(2, "delivering to $target", $label);
@@ -286,16 +288,17 @@ sub deliver {
 @Mail::Sort::sendmails = ('/usr/sbin/sendmail', '/usr/lib/sendmail');
 
 sub forward {
-    my ($self, $target) = (shift, shift);
+    my ($self, $target) = splice(@_, 0, 2);
     my $keep = 0;
     my $label = undef;
 
-    my ($arg, $val) = (shift, shift);
-    while (defined $arg and defined $val) {
+  VAL:
+    while (1) {
+        my ($arg, $val) = splice(@_, 0, 2);
+        last VAL unless defined $val;
         if ($arg eq 'keep') { $keep = $val; }
         elsif ($arg eq 'label') { $label = $val; }
         else { $self->log(1, "$arg is not a valid key for Mail::Sort::forward"); }
-        ($arg, $val) = (shift, shift);
     }
 
     # hmmm, we have a dilemma here.  we could send the message using
@@ -474,6 +477,8 @@ sub base64_text {
 sub missing_mimeole {
     my $self = $_[0];
     return ($self->header_match('x-msmail-priority')
+            # squirrelmail seems to insert this header, so make an exception for it
+            and not $self->header_match('x-mailer','squirrelmail')
             and not $self->header_match('x-mimeole'));
 }
 
