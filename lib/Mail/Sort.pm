@@ -1,4 +1,4 @@
-# $Id: Sort.pm,v 1.22 2002/01/29 22:41:57 itz Exp itz $
+# $Id: Sort.pm,v 1.23 2002/03/21 08:08:17 itz Exp $
 
 package Mail::Sort;
 
@@ -7,7 +7,7 @@ package Mail::Sort;
 
 no warnings qw(digit);
 
-$VERSION = '$Date: 2002/01/29 22:41:57 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
+$VERSION = '$Date: 2002/03/21 08:08:17 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
 
 
 use FileHandle 2.00;
@@ -388,7 +388,7 @@ sub asian_origin {
 
 sub no_message_id {
     my $self = $_[0];
-    return (not $self->header_start('message-id',"\\s*<\\s*[^> ][^>]*\\s*>\\s*\$"));
+    return (not $self->header_start('message-id',"\\s*<\\s*[^> ][^>]*\\s*>\\s*(\\(added by [^<>()]+\\)\\s*)?\$"));
 }
 
 1;
