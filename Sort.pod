@@ -1,4 +1,4 @@
-# $Id: Sort.pod,v 1.16 2002/05/16 06:13:17 itz Exp $
+# $Id: Sort.pod,v 1.17 2002/11/21 22:00:15 itz Exp $
 =pod
 
 =head1 NAME
@@ -398,10 +398,81 @@ header.
 Returns true if the message has a Bcc: header (showing, at the very
 least, that the sender has used a broken MUA to send it).
 
+=item $spam_flag = $sort->eight_bit_header();
+
+Returns true if the message has a From: or Subject: header with
+many consecutive character codes in the range 0x80 through 0xff.  This
+typically means that the header is written in some Asian language and
+not properly encoded.
+
+=item $spam_flag = $sort->faraway_charset($charset1, $charset2, ...);
+
+Returns true if the message has a From: or Subject: header in one of
+the indicated charsets (the "usual suspects" are 'iso-2022-jp',
+'gb-2312' and 'euc-kr'), or that it is a MIME message whose body uses
+one of these, as indicated by the Content-Type: header.
+
 =item $spam_flag = $sort->no_message_id();
 
 Returns true if the message doesn't have a Message-Id: header that
 makes at least a credible try for conformance.
+
+=item $spam_flag = $sort->strange_mime();
+
+Returns true if the message has a Mime-Version: header with a
+strangely capitalized tag (namely, 'MiME-Version').
+
+=item $spam_flag = $sort->subject_free_caps();
+
+Returns true if the message's Subject: header contains the capitalized
+word 'FREE'.
+
+=item $spam_flag = $sort->subject_all_caps();
+
+Returns true if the messages's Subject: header doesn't contain at
+least one lowercase Latin letter.
+
+=item $spam_flag = $sort->subject_has_spaces();
+
+Returns true if the messages's Subject: header contains many
+consecutive space characters or a horizontal tab character.
+
+=item $spam_flag = $sort->too_many_recipients($limit);
+
+Returns true if there are more than $limit addresses in the message's
+destination headers (usually To:, Cc: or Bcc:, but see
+C<destination_match>).
+
+=item $spam_flag = $sort->html_only();
+
+Returns true if the message is a MIME message with Content-Type
+text/html and no alternatives.
+
+=item $spam_flag = $sort->address_as_realname();
+
+Returns true if the message's headers contain an address that repeats
+the preceding Real Name, for example "foo123@spammers.com"
+<foo123@spammers.com>.
+
+=item $spam_flag = $sort->base64_text();
+
+Returns true if the message is a MIME message with Content-Type
+text/plain and Content-Transfer-Encoding base64.
+
+=item $spam_flag = $sort->missing_mimeole();
+
+Returns true if the message has a X-Msmail-Priority: header but no
+X-Mimeole: header.
+
+=item $spam_flag = $sort->msgid_spam_chars();
+
+Returns true if the message has a Message-Id: containing plainly
+invalid characters.
+
+=item $spam_flag = $sort->from_ends_in_digit();
+
+Returns true if the local part of the From: address ends in a digit
+character, for example "foo123@spammers.com".
 
 =item $spam_flag = $sort->razor_check();
 
@@ -414,6 +485,14 @@ signature against a Razor server's blacklist.
 
 Note that Mail::Sort doesn't I<depend> on Razor; the Razor modules are
 pulled in at runtime, and only if you actually call this method.
+
+=item $spam_hitlist_hash = $sort->spamassassin_check(); $superlong_score = $spam_hitlist_hash->{'SUPERLONG_LINE'};
+
+Continuing in the same spirit, spamassassin support has been added.
+This method returns a reference to a hash, where the hash keys are
+names of spamassassin tests (such as 'SUPERLONG_LINE') that have been
+hit, and the hash values are the corresponding scores spamassassin has
+assigned. 
 
 =back
 

@@ -1,4 +1,4 @@
-# $Id: Sort.pm,v 1.31 2002/05/14 22:37:39 itz Exp $
+# $Id: Sort.pm,v 1.48 2002/11/21 21:20:18 itz Exp $
 
 package Mail::Sort;
 
@@ -7,7 +7,7 @@ package Mail::Sort;
 
 no warnings qw(digit);
 
-$VERSION = '$Date: 2002/05/14 22:37:39 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
+$VERSION = '$Date: 2002/11/21 21:20:18 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
 
 
 use FileHandle 2.00;
@@ -170,6 +170,7 @@ sub sender_match {
 
 sub log {
     my ($self, $level, $what, $label) = @_;
+    chomp $what;
     if ($label) {
         $what = '('.$label.') '.$what;
     }
@@ -357,7 +358,12 @@ sub fake_received {
 
 sub missing_required {
     my $self = $_[0];
-    return !$self->header_match('from') or !$self->header_match('date');
+    return (!$self->header_match('from') or !$self->header_match('date'));
+}
+
+sub invalid_date {
+    my $self = $_[0];
+    return (!$self->header_match('date','(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), )?[0-3 ]?[0-9] (?:Jan|Feb|Ma[ry]|Apr|Ju[nl]|Aug|Sep|Oct|Nov|Dec) (?:[12][901])?[0-9]{2} [0-2][0-9](?:\:[0-5][0-9]){1,2} (?:[+-][0-9]{4}|UT|[A-Z]{2,3}T)(?:\s+\(.*\))?'));
 }
 
 sub overflow_attempt {
@@ -387,7 +393,8 @@ sub bad_x_uidl {
 
 sub oceanic_date {
     my $self = $_[0];
-    return $self->header_match('(date|received)','-0600 \(EST\)');
+    return ($self->header_match('(date|received)','-0600 \(EST\)')
+            or $self->header_match('date','[-+](?:1[4-9]\d\d|[2-9]\d\d\d)'));
 }
 
 sub empty_header {
@@ -400,15 +407,89 @@ sub visible_bcc {
     return $self->header_match('bcc');
 }
 
+sub eight_bit_header {
+    my $self = $_[0];
+    return ($self->header_match('(from|subject)','[\x80-\xff][\x80-\xff][\x80-\xff][\x80-\xff]'));
+}
+
+sub faraway_charset {
+    my $self = shift;
+    my $joined = join '|', @_ ;
+    my $charsets_rx = '(' . $joined . ')';
+    return ($self->header_start('(from|subject)','=\?' . $charsets_rx . '\?')
+            or $self->header_match('content-type','charset="' . $charsets_rx . '"'));
+}
+
 sub asian_origin {
     my $self = $_[0];
-    return ($self->header_match('(from|subject)','(=\?gb2312\?|[\x80-\xff][\x80-\xff][\x80-\xff][\x80-\xff]|=[89][0-9A-F]=[89][0-9A-F]=[89][0-9A-F]=[89][0-9A-F])') or
-            grep /[\x80-\xff][\x80-\xff][\x80-\xff][\x80-\xff]|=[89][0-9A-F]=[89][0-9A-F]=[89][0-9A-F]=[89][0-9A-F]/, @{$self->{body}} );
+    return ($self->eight_bit_header() or $self->faraway_charset('iso-?2022-?jp', 'gb-?2312'));
 }
 
 sub no_message_id {
     my $self = $_[0];
     return (not $self->header_start('message-id',"\\s*<\\s*[^> ][^>]*\\s*>\\s*(\\(added by [^<>()]+\\)\\s*)?\$"));
+}
+
+sub strange_mime {
+    my $self = $_[0];
+    return ($self->header_match('MiME-Version'));
+}
+
+sub subject_free_caps {
+    my $self = $_[0];
+    return $self->header_match('Subject', '\bFREE\b');
+}
+
+sub subject_all_caps {
+   my $self = $_[0];
+   return (!$self->header_match('Subject','[a-z]'));
+}
+
+sub subject_has_spaces {
+    my $self = $_[0];
+    return ($self->header_match('subject','( {6}|[\t])\S'));
+}
+
+sub too_many_recipients {
+    my ($self, $limit) = @_;
+    return ($self->destination_match("(,.*){$limit}"));
+}
+
+sub html_only {
+    my $self = $_[0];
+    return $self->header_match('content-type','text/html');
+}
+
+sub address_as_realname {
+    my $self = $_[0];
+    return $self->header_start('"([^"@]+\@[^"@]+)"\s+<\1>');
+}
+
+sub base64_text {
+    my $self = $_[0];
+    return ($self->header_match('content-type','text/plain')
+            and $self->header_match('content-transfer-encoding','base64'));
+}
+
+sub missing_mimeole {
+    my $self = $_[0];
+    return ($self->header_match('x-msmail-priority')
+            and not $self->header_match('x-mimeole'));
+}
+
+sub msgid_spam_chars {
+    my $self = $_[0];
+    return ($self->header_match('message-id','[:}{,!\/]'));
+}
+
+sub from_ends_in_digit {
+    my $self = $_[0];
+    return ($self->header_match('from','\d\@'));
+}
+
+sub received_by_smtpd32 {
+    my $self = $_[0];
+    return ($self->header_match('received','smtpd32'));
 }
 
 # razor integration
@@ -427,6 +508,27 @@ sub razor_check {
     defined $reply && return $reply->[0];
     $self->log(1, "razor check failed: $Razor::Client::errstr");
     return 0;
+}
+
+# spamassassin integration
+
+sub spamassassin_check {
+    require Mail::SpamAssassin;
+
+    my $self = shift;
+    my $checker = { @_ };
+    Mail::SpamAssassin->new($checker);
+    my $status = $checker->check_message_text($self->{obj}->as_string());
+    my $total = $status->get_hits();
+    my @hits = split /\s*,\s*/, $status->get_names_of_tests_hit();
+    my $report = $status->get_report();
+    my %hitlist = ('total' => $total);
+    foreach my $hit (@hits) {
+        $report =~ m{\n\s*SPAM:\s*$hit\s*\((-?[0-9]+\.[0-9]+)} ;
+        $hitlist{$hit} = $1;
+    }
+    $status->finish();
+    return \%hitlist;
 }
 
 1;
