@@ -1,4 +1,4 @@
-# $Id: Sort.pod,v 1.15 2001/10/28 19:34:13 itz Exp $
+# $Id: Sort.pod,v 1.16 2002/05/16 06:13:17 itz Exp $
 =pod
 
 =head1 NAME
@@ -352,6 +352,71 @@ envelope sender and current local time.
 
 =back
 
+=head1 ANTISPAM FEATURES
+
+As of version 2002-05-15, Mail::Sort now includes some tests that can
+identify UCE (Unsolicited Commercial Email, also known as Spam
+although that is a misuse of a term that properly applies to Usenet
+posts) with reasonable confidence.
+
+First a few ad-hoc tests:
+
+=over
+
+=item $spam_flag = $sort->fake_received();
+
+Returns true if there are telltale signs that some of the message's
+Received headers were forged, rather than prepended by a legitimate MTA.
+
+=item $spam_flag = $sort->missing_required();
+
+Returns true if the message is missing one of the RFC 822 required
+headers: From: or Date:.
+
+=item $spam_flag = $sort->overflow_attempt();
+
+Returns true if the message has an unreasonably long unbroken Received
+header line.  The word is this has been used as an exploit of a
+sendmail(8) weakness.
+
+=item $spam_flag = $sort->bad_x_uidl();
+
+Returns true if the message has a non-conforming X-UIDL: header.
+
+=item $spam_flag = $sort->oceanic_date();
+
+Returns true if the message's Date: or Received: headers show a
+geographically impossible timezone.
+
+=item $spam_flag = $sort->empty_header();
+
+Returns true if the message has an empty From:, To:, or Reply-To:
+header.
+
+=item $spam_flag = $sort->visible_bcc();
+
+Returns true if the message has a Bcc: header (showing, at the very
+least, that the sender has used a broken MUA to send it).
+
+=item $spam_flag = $sort->no_message_id();
+
+Returns true if the message doesn't have a Message-Id: header that
+makes at least a credible try for conformance.
+
+=item $spam_flag = $sort->razor_check();
+
+And now the great news!  I don't personally use any of the above
+methods, because Mail::Sort now includes support for Vipul's Razor - a
+collaborative stamping-out-spam initiative.  To get the big picture
+about Razor, please read its documentation.  The C<razor_check> method
+uses your existing Razor configuration to check the message digital
+signature against a Razor server's blacklist.
+
+Note that Mail::Sort doesn't I<depend> on Razor; the Razor modules are
+pulled in at runtime, and only if you actually call this method.
+
+=back
+
 =head1 ATTRIBUTES
 
 =over
@@ -396,6 +461,7 @@ F</dev/stderr> - default log file
 
 L<procmail(1)>, L<procmailrc(5)>, L<Mail::Audit(3)>,
 L<Mail::Procmail(3)>, L<sendmail(8)>, L<Mail::Internet(3)>,
+L<Razor::Client(3)>, L<Razor::Config(3)>, L<Razor::String(3)>,
 L<open(2)>, L<fork(2)>, L<maildir(5)>, L<formail(1)>
 
 =head1 DIAGNOSTICS

@@ -1,4 +1,4 @@
-# $Id: Sort.pm,v 1.30 2002/04/01 08:31:33 itz Exp $
+# $Id: Sort.pm,v 1.31 2002/05/14 22:37:39 itz Exp $
 
 package Mail::Sort;
 
@@ -7,7 +7,7 @@ package Mail::Sort;
 
 no warnings qw(digit);
 
-$VERSION = '$Date: 2002/04/01 08:31:33 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
+$VERSION = '$Date: 2002/05/14 22:37:39 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
 
 
 use FileHandle 2.00;
@@ -411,4 +411,24 @@ sub no_message_id {
     return (not $self->header_start('message-id',"\\s*<\\s*[^> ][^>]*\\s*>\\s*(\\(added by [^<>()]+\\)\\s*)?\$"));
 }
 
+# razor integration
+
+sub razor_check {
+    require Razor::String;
+    require Razor::Config;
+    require Razor::Client;
+
+    my $self = $_[0];
+    my @lines = ("\n", @{$self->{body}});
+    my $hash = Razor::String::hash (\@lines);
+    my $config = Razor::Config::findconf('razor.conf');
+    my $client = Razor::Client->new ($config);
+    my $reply = $client->check(sigs => [$hash]);
+    defined $reply && return $reply->[0];
+    $self->log(1, "razor check failed: $Razor::Client::errstr");
+    return 0;
+}
+
 1;
+
+
