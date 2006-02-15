@@ -9,3 +9,4 @@ t/deliver.t
 t/headers.t
 t/lock.t
 t/log.t
+META.yml                                 Module meta-data (added by MakeMaker)

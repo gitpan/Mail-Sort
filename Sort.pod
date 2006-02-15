@@ -263,7 +263,7 @@ Locks are NOT automatically released when a filter process exits,
 because this leads to conceptual difficulties with L<fork(2)>.
 However, such functionality may be provided in a future version.
 
-=item $sort->deliver(I<target>, keep => I<keep>, lockfile => I<lockfile>, label => I<label>);
+=item $sort->deliver(I<target>, keep => I<keep>, lockfile => I<lockfile>, label => I<label>, mbox => I<mbox>);
 
 Delivers the message to I<target>.  I<target> is any string suitable
 for open(); thus this method can 
@@ -277,11 +277,12 @@ Create and write a new file containing a single message
 
 =item 2. 
 
-Append the message to an existing file.  Note that in this case I<no>
-Unix style From processing is done; Mail::Sort is not a kitchen sink.
-For delivery to Unix mboxes, use the next option with a
-program that does From processing and escaping (eg. L<formail(1)>).
-Sometimes you can even configure the MTA to do From escaping before is
+Append the message to an existing file.  No
+Unix style From processing is done unless I<mbox> is true,
+in which case the original From line is prepended if one was present,
+or a new one is created.  If you need to do >From escaping, use the next option with a
+program that does it (eg. L<formail(1)>).
+Sometimes you can configure the MTA to do From escaping before it
 passes the mail to the MDA; but this setup is offensive to purists, as
 the From line (and the necessary escaping it entails) has nothing to
 do with the message itself and everything to do with one MUA-specific

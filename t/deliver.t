@@ -2,7 +2,7 @@
 
 use Test;
 
-BEGIN { plan tests => 9 };
+BEGIN { plan tests => 13 };
 
 use Mail::Sort;
 use Config;
@@ -35,6 +35,19 @@ unlink 'test1~';
 
 ok($status);
 unshift @lines, $data[0];
+ok($#lines == $#data);
+ok(join('',@lines) eq join('',@data));
+
+#delivery in mbox format
+$status = $sort->deliver('>test1~', keep => 1, mbox => 1);
+$fh = new FileHandle('test1~', '<');
+die "$!" unless (defined $fh);
+@lines = $fh->getlines();
+$fh->close();
+unlink 'test1~';
+
+ok($status);
+ok(pop (@lines) eq "\n");
 ok($#lines == $#data);
 ok(join('',@lines) eq join('',@data));
 

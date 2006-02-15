@@ -1,4 +1,4 @@
-# $Id: Sort.pm,v 1.54 2003/03/18 17:13:21 itz Exp $
+# $Id: Sort.pm,v 1.1 2006/02/15 05:18:05 itz Exp $
 
 package Mail::Sort;
 
@@ -7,7 +7,7 @@ package Mail::Sort;
 
 no warnings qw(digit);
 
-$VERSION = '$Date: 2003/03/18 17:13:21 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
+$VERSION = '$Date: 2006/02/15 05:18:05 $ '; $VERSION =~ s|^\$Date:\s*([0-9]{4})/([0-9]{2})/([0-9]{2})\s.*|\1.\2.\3| ;
 
 
 use FileHandle 2.00;
@@ -30,12 +30,13 @@ our %signo = do { my $i = 0; map {$_, $i++} split(' ', $Config{sig_name}) };
 
 our ($sendmail) = grep -x, ($Config{sendmail}, '/usr/sbin/sendmail', '/usr/lib/sendmail');
 
-our %objkeys = map {$_, 1} qw(test logfile loglevel lockwait locktries callback envelope_from);
+our %objkeys = map {$_, 1} qw(test logfile loglevel lockwait locktries callback envelope_from from_line);
 
 sub _copy_from_array {
     my $self = shift;
     if ( $_[0] =~ m( ^From\s+(\S+) )x ) {
         $self->{envelope_from} = $1;
+        $self->{from_line} = $_[0];
         shift;
     }
     $self->{obj} = new Mail::Internet(\@_, Modify => 0) or exit TEMPFAIL;
@@ -70,6 +71,7 @@ sub new {
     $self->{'lockwait'} ||= 5;
     $self->{'locktries'} ||= 10;
     $self->{'envelope_from'} ||= "$ENV{LOGNAME}\@localhost";
+    $self->{'from_line'} ||= &make_from_line ($self);
     
     my $head = $self->{obj}->head->dup(); # create a dup because we'll modify this one
     $head->modify(0);
@@ -191,7 +193,7 @@ sub unlock {
 
 sub deliver {
     my ($self, $target) = splice(@_, 0, 2);
-    my ($keep, $lockfile, $label);
+    my ($keep, $lockfile, $label, $mbox);
     $target =~ m( >>\s*(\S+) )x and $lockfile = $1 . '.lock';
 
   VAL:
@@ -202,6 +204,7 @@ sub deliver {
             /^keep/		and $keep = $val,	next VAL;
             /^lockfile/         and $lockfile = $val,   next VAL;
             /^label/            and $label = $val,      next VAL;
+            /^mbox/             and $mbox = $val,       next VAL;
             $self->log(1, "$arg is not a valid key for Mail::Sort::deliver");
         }
     }
@@ -216,7 +219,16 @@ sub deliver {
         $write_st = 0;
     } else {
         local ($SIG{PIPE}, $?) = 'IGNORE'; # make sure to get status of fh->close() below 
-        $write_st = $self->{obj}->print($fh) unless $self->{test};
+        if (!$self->{test}) {
+            $write_st = $fh->print ($self->{from_line})
+                if $mbox;
+            $write_st = $self->{obj}->print($fh)
+                if $write_st;
+            my $last_line = scalar (@{$self->{body}}) - 1;
+            $write_st = $fh->print ("\n")
+                if $write_st && $mbox && $last_line >= 0
+                && ${$self->{body}} [$last_line] ne "\n";
+        }
         $fh->close();
         if ($? and (not WIFSIGNALED($?) or WTERMSIG($?) != $self->{_signo}->{PIPE})) {
             $self->log(0, "delivery subprocess exited with status $?");
