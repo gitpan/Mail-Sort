@@ -1,4 +1,4 @@
-# $Id: Sort.pod,v 1.17 2002/11/21 22:00:15 itz Exp $
+# $Id: Sort.pod 21 2006-04-21 05:20:33Z itz $
 =pod
 
 =head1 NAME
@@ -33,56 +33,12 @@ Mail::Sort - split incoming mail according to header matching conditions
  $sort->ignore()
         if grep { $_ =~ /make money/ } @{$sort->{body}};
 
- exit(TEMPFAIL);
+ exit(1);
 
 =head1 DESCRIPTION
 
-Mail::Sort is yet another module intended to enable the writing
-of mail filters in the style of L<procmail(1)>.  It was written when
-I realized that the previous entries (L<Mail::Audit(3)> and
-L<Mail::Procmail(3)>), while trying to emphasize elegance and brevity,
-sacrificed a good deal of B<procmail>'s flexibility and power.
-
-First and foremost, both of these existing modules only allow for
-matching a single header at a time, throwing away B<procmail>'s TO_
-feature (or any equivalent way of using a non-trivial regexp to match
-a header tag).  This really hurts when you try to match mailing lists
-and spam list headers.  Second, while I sympathize with the choice of
-procedural interface with global variables in Mail::Procmail (way too
-much of Perl code out there uses object-oriented syntax for no good
-reason whatsoever), in the present case it means that the message
-cannot be modified and then fed into another instance of the filter,
-again a limitation in comparison to B<procmail>.
-
-Mail::Sort is meant to end the history of this particular area by
-matching B<procmail>'s features 1-1.  The (remaining) exceptions are
-noted under L</"BUGS">.
-
-=head1 EXPORTS
-
-=over
-
-=item TEMPFAIL
-
-The constant to use as exit status when mail cannot be delivered.
-MTAs such as L<sendmail(8)> depend on this to queue the mail for a
-later delivery attempt.  You should almost always end your filter
-script with
-
- exit TEMPFAIL;
-
-=item DELIVERED
-
-The constant to use as exit status when mail is successfully
-delivered.  This tells the MTA that all is well and it can dequeue the
-mail.  Note that the delivery methods of Mail::Sort already call
-
- exit DELIVERED;
-
-internally, so there's usually no need to use this constant in filter
-scripts.
-
-=back
+Yet another module intended to enable the writing
+of mail filters in the style of L<procmail(1)>.
 
 =head1 CONSTRUCTORS
 
@@ -103,7 +59,7 @@ are used by convention:
 
 =over
 
-=item errors (delivery aborted with TEMPFAIL) => 0
+=item errors (delivery should be aborted with nonzero exit status) => 0
 
 =item warnings (delivery continues) => 1
 
@@ -141,15 +97,6 @@ instead of F<stdin>.
 This alternative form of the constructor reads a mail message from the array reference
 I<arrayref> instead of a filehandle.
 
-=item $sort = new Mail::Sort(I<obj>, test => I<test>, logfile => I<logfile>, loglevel => I<loglevel>, lockwait => I<lockwait>, locktries => I<locktries>, callback => I<callback>, envelope_from => I<envelope_from>);
-
-This alternative form of the constructor omits the reading of a mail
-message from F<stdin> and instead it accepts I<obj>, a reference to a
-ready-made L<Mail::Internet(3)> object.  This is meant to support a
-style where the message (obtained as described in {obj} under
-L</"ATTRIBUTES">) is modified by user-supplied Perl code, then fed
-back into the filter.
-
 =back
 
 =head1 METHODS
@@ -164,9 +111,16 @@ I<pattern>, after leading I<context>.  I<tag>, I<pattern>, I<context>
 are Perl regular expressions; I<pattern>, I<context> are optional with
 natural defaults, so this can also be used to simply retrieve a
 particular header.  The matching is case-insensitive unless I<tag>
-contains an uppercase ASCII letter.  The method returns a list of all
-matching header lines (note that multi-line headers are automatically
-unfolded).
+contains an uppercase ASCII letter.  The method returns the list of
+indices of all matching header lines.  The text of the header lines
+itself can be obtained with the next method.
+
+=item @headers = $sort->get_header(I<matches>);
+
+Given a set I<matches> (represented as a list) of header indices,
+returns the list of actual corresonding headers.  Because this library
+doesn't silently modify the headers (or body) in any way, the returned
+headers may be B<folded>, i.e. each may consist of more than one line.
 
 =item $match = $sort->match_group(I<index>);
 
@@ -181,23 +135,24 @@ For example:
  $which = $sort->match_group(1);
 
 Some caveats are in order.  First, if multiple headers match and are
-returned from header_start (that can only happen if you use a
-nontrivial regexp for the tag, or use one of the following methods
-that do that behind your back), the last matching header wins and sets
-the match groups.  Second, if you have groups in I<tag> or I<context>,
+returned from header_start (that can happen if you use a
+nontrivial regexp for the tag, use one of the following methods
+that do that behind your back, or match a repeated header such as Received),
+the last matching header wins and sets the match groups.
+Second, if you have groups in I<tag> or I<context>,
 you must use the (?:) syntax, otherwise they become part of the total
 match and their contents will be returned by match_group.
 
 =item @matches = $sort->header_start(I<tag>, I<pattern>);
 
-This method returns the list of headers whose contents I<start> with
+This method returns the list of header indices whose contents I<start> with
 I<pattern>.  The call above is exactly equivalent to
 
  @matches = $sort->header_match($tag, $pattern, '\s*');
 
 =item @matches = $sort->destination_match(I<pattern>, I<context>);
 
-This method returns the list of matching I<destination> headers.  The
+This method returns the list of matching I<destination> header indices.  The
 call above is exactly equivalent to
 
  @matches = $sort->header_match(
@@ -207,7 +162,7 @@ call above is exactly equivalent to
 
 =item @matches = $sort->destination_address(I<address>);
 
-This method returns the list of headers with matching 
+This method returns the list of header indices with matching 
 I<destination addresses>.  
 It corresponds to B<procmail>'s TO_ construct.  The call
 above is exactly equivalent to
@@ -217,7 +172,7 @@ above is exactly equivalent to
 
 =item @matches = $sort->destination_word(I<word>);
 
-This method returns the list of headers with matching 
+This method returns the list of header indices with matching 
 I<destination words>.  
 It corresponds to B<procmail>'s TO construct.  The call
 above is exactly equivalent to
@@ -226,7 +181,7 @@ above is exactly equivalent to
 
 =item @matches = $sort->sender_match(I<pattern>, I<context>);
 
-This method returns the list of matching I<sender> headers.  
+This method returns the list of matching I<sender> header indices.  
 It is intended mostly to help with matching mail from lists.
 The call above is exactly equivalent to
 
@@ -245,7 +200,7 @@ be called directly by the user to produce customized logging.
 =item $sort->lock(I<lockfile>);
 
 Attempts to atomically create I<lockfile> (using
-L<open(2)>); exits with TEMPFAIL unless successful.
+L<open(2)>); B<die>s unless successful.  
 
 The
 Mail::Sort delivery methods call this internally to lock the
@@ -255,13 +210,18 @@ serializes any two instances of the filter), or to temporarily lock a
 destination mailbox where the necessity of this cannot be deduced
 automatically. 
 
+As with other methods that can B<die>, if you wish to treat this
+as a temporary error (and let your MTA queue the mail) you need to
+either wrap the entire Perl delivery program in a shell script,
+or use B<eval>, to ensure that the delivery process as a whole
+exits with EX_TEMPFAIL.
+
 =item $sort->unlock(I<lockfile>);
 
 This just calls L<unlink(2)> on I<lockfile>.
 
 Locks are NOT automatically released when a filter process exits,
 because this leads to conceptual difficulties with L<fork(2)>.
-However, such functionality may be provided in a future version.
 
 =item $sort->deliver(I<target>, keep => I<keep>, lockfile => I<lockfile>, label => I<label>, mbox => I<mbox>);
 
@@ -280,18 +240,14 @@ Create and write a new file containing a single message
 Append the message to an existing file.  No
 Unix style From processing is done unless I<mbox> is true,
 in which case the original From line is prepended if one was present,
-or a new one is created.  If you need to do >From escaping, use the next option with a
-program that does it (eg. L<formail(1)>).
-Sometimes you can configure the MTA to do From escaping before it
-passes the mail to the MDA; but this setup is offensive to purists, as
-the From line (and the necessary escaping it entails) has nothing to
-do with the message itself and everything to do with one MUA-specific
-file format (the Unix mbox).
+or a new one is created.  Also, ^From_ lines in the body are
+properly escaped B<unless> a From mbox line was originally present
+(its presence is taken as cue that the message has already been
+put into mbox format earlier in the data path).
 
 =item 3.
 
-Feed the message to a pipe.  Currently, the other end of the pipe must
-be an external command.  See L</"BUGS">.
+Feed the message to a pipe.
 
 =back
 
@@ -311,189 +267,162 @@ by providing the argument I<lockfile>.
 This method logs a record of the delivery at I<loglevel> 2; if
 I<label> is present, it's made part of the record, as described above.
 
-Unless I<keep> is true, this method exits with status DELIVERED
-upon successful completion.  
+Unless I<keep> is true, this method exits with status 0
+upon successful completion.  In case of failure it B<die>s, so wrap.
 
 =item $sort->forward(I<target>, keep => I<keep>, label => I<label>);
 
 Forwards the message to the Internet address I<target>.  This is
 almost exactly equivalent to
 
- $sort->deliver("| $Config::Config{sendmail} $target",
+ $sort->deliver("| sendmail $target",
  keep => $keep, label => $label);
-
-except that on on many systems $Config{sendmail} isn't set, including
-ones where B<sendmail(8)> is in use.
 
 This method logs a record of the delivery at I<loglevel> 2; if
 I<label> is present, it's made part of the record, as described above.
 
-Unless I<keep> is true, this method exits with status DELIVERED
-upon successful completion.  
+Unless I<keep> is true, this method exits with status 0
+upon successful completion.  In case of failure it B<die>s, so wrap.
 
 =item $sort->ignore(I<label>);
 
 Trashes the message in the bit bucket for eternity.  This is exactly
 equivalent to
 
- $sort->deliver("| $Config::Config{cat} >/dev/null",
+ $sort->deliver("| cat >/dev/null",
  label => $label);
 
 This method logs a record of the delivery (such as it is) at
 I<loglevel> 2; if I<label> is present, it's made part of the record,
 as described above.
 
-This method exits with status DELIVERED
+This method exits with status 0
 upon successful completion.  
+
+=item $sort->filter(I<argv_array_ref>, I<label>);
+
+Passes the mail as input to an external program and re-initializes self
+with the output of the program.  This is the way to use a program such as
+L<formail(1)> as a filter.
 
 =item $from = $sort->make_from_line();
 
 Returns a fresh automatically generated Unix style From line, with the
 envelope sender and current local time.
 
-=back
+=item $sort->add_header_at(I<header_line>, I<index>, I<label>);
 
-=head1 ANTISPAM FEATURES
+Adds a new header at position I<index> in the header array.  All existing
+headers above I<index> move up by one.  I<header_line> must be the complete
+header line being inserted, including the header tag (such as Received:).
+You can also insert a RFC 822 conforming multi-line header, in which case
+I<header_line> must be the concatenation of all (physical) lines that
+comprise the header.  I<label> is optional and is used for logging.
 
-As of version 2002-05-15, Mail::Sort now includes some tests that can
-identify UCE (Unsolicited Commercial Email, also known as Spam
-although that is a misuse of a term that properly applies to Usenet
-posts) with reasonable confidence.
+=item $sort->append_header(I<header_line>, I<label>);
 
-First a few ad-hoc tests:
+Just like the preceding method, but appends the new header at the end
+the header array instead of splicing it in the middle.  It is exactly
+equivalent to
 
-=over
+ $sort->add_header_at(I<header_line>, scalar @{$sort->{head}});
 
-=item $spam_flag = $sort->fake_received();
+=item $sort->append_header_if_absent(I<header_line>, I<label>);
 
-Returns true if there are telltale signs that some of the message's
-Received headers were forged, rather than prepended by a legitimate MTA.
+Just like the preceding method, but appends the new header at the end
+the header array only unless a matching header already exists.
 
-=item $spam_flag = $sort->missing_required();
+=item $sort->add_header_before(I<header_line>, I<tag>, I<index>, I<label>);
 
-Returns true if the message is missing one of the RFC 822 required
-headers: From: or Date:.
+If there's exactly one header line with I<tag> and I<index> is 0,
+this will insert I<header_line> just before I<tag>
+(kicking it and all following headers up one).
+If there are multiple occurrences of I<tag>, I<index> selects before 
+which one to insert.  Important: I<index> is the position in the
+list of headers with I<tag>, B<not all headers>.
 
-=item $spam_flag = $sort->overflow_attempt();
+=item $sort->add_header_after(I<header_line>, I<tag>, I<index>, I<label>);
 
-Returns true if the message has an unreasonably long unbroken Received
-header line.  The word is this has been used as an exploit of a
-sendmail(8) weakness.
+Just like the preceding method, but adds after the selected occurrence
+of I<tag>.
 
-=item $spam_flag = $sort->bad_x_uidl();
+=item $sort->delete_header_at(I<index>, I<label>);
 
-Returns true if the message has a non-conforming X-UIDL: header.
+Deletes the header at position I<index> in the header array.  All existing
+headers above I<index> move down by one.
 
-=item $spam_flag = $sort->oceanic_date();
+=item $sort->delete_header_tag(I<tag>, I<index>, I<label>);
 
-Returns true if the message's Date: or Received: headers show a
-geographically impossible timezone.
+As before, I<index> selects one of the occurrences of I<tag>.  The header
+with this occurrence is deleted.
 
-=item $spam_flag = $sort->empty_header();
+=item $sort->delete_header_tag_all(I<tag>, I<label>);
 
-Returns true if the message has an empty From:, To:, or Reply-To:
-header.
+This method deletes all occurrences of I<tag>.  It returns the list of
+deleted headers.
 
-=item $spam_flag = $sort->visible_bcc();
+=item $sort->replace_header_at(I<header_line>, I<index>, I<label>);
 
-Returns true if the message has a Bcc: header (showing, at the very
-least, that the sender has used a broken MUA to send it).
+Replace the header at position I<index> in the header array with I<header_line>.
+This must be the complete header line including tag, as before.
 
-=item $spam_flag = $sort->eight_bit_header();
+=item $sort->replace_header_tag(I<header_line>, I<tag>, I<index>, I<label>);
 
-Returns true if the message has a From: or Subject: header with
-many consecutive character codes in the range 0x80 through 0xff.  This
-typically means that the header is written in some Asian language and
-not properly encoded.
+As before, I<index> selects one of the occurrences of I<tag>.  The header
+with this occurrence is replaced with I<header_line>.
 
-=item $spam_flag = $sort->faraway_charset($charset1, $charset2, ...);
+=item $sort->transform_header_at(I<xform>, I<index>, I<label>);
 
-Returns true if the message has a From: or Subject: header in one of
-the indicated charsets (the "usual suspects" are 'iso-2022-jp',
-'gb-2312' and 'euc-kr'), or that it is a MIME message whose body uses
-one of these, as indicated by the Content-Type: header.
+I<xform> must be a reference to a subroutine which expect a scalar reference
+as its only argument, and may modify the referent.  This method applies I<xform>
+to the header line at position I<index> in the header array.
 
-=item $spam_flag = $sort->no_message_id();
+=item $sort->transform_header_tag(I<xform>, I<tag>, I<index>, I<label>);
 
-Returns true if the message doesn't have a Message-Id: header that
-makes at least a credible try for conformance.
+As before, I<index> selects one of the occurrences of I<tag>.  The header
+with this occurrence is modified by passing it to I<xform>.
 
-=item $spam_flag = $sort->strange_mime();
+=item $sort->rename_header_at(I<newtag>, I<index>, I<label>);
 
-Returns true if the message has a Mime-Version: header with a
-strangely capitalized tag (namely, 'MiME-Version').
+Rename the header at position I<index> in the header array with I<newtag>.
 
-=item $spam_flag = $sort->subject_free_caps();
+=item $sort->rename_header_tag(I<newtag>, I<tag>, I<index>, I<label>);
 
-Returns true if the message's Subject: header contains the capitalized
-word 'FREE'.
+As before, I<index> selects one of the occurrences of I<tag>.  The header
+with this occurrence is renamed to I<newtag>.
 
-=item $spam_flag = $sort->subject_all_caps();
+=item $sort->rename_header_tag_all(I<newtag>, I<tag>, I<label>);
 
-Returns true if the messages's Subject: header doesn't contain at
-least one lowercase Latin letter.
+This method renames all occurrences of I<tag> to I<newtag>.
 
-=item $spam_flag = $sort->subject_has_spaces();
+=item $sort->append_header_and_rename(I<header_line>, I<label>);
 
-Returns true if the messages's Subject: header contains many
-consecutive space characters or a horizontal tab character.
+Appends I<line> to the header array just like append_header, but in addition
+renames all existing same-named headers to "X-Original-I<tag>", where I<tag>
+is the tag of I<header_line>.
 
-=item $spam_flag = $sort->too_many_recipients($limit);
+=item $sort->uniquify_tag_first(I<tag>, I<label>);
 
-Returns true if there are more than $limit addresses in the message's
-destination headers (usually To:, Cc: or Bcc:, but see
-C<destination_match>).
+Deletes all occurrences of I<tag> except the first.
 
-=item $spam_flag = $sort->html_only();
+=item $sort->uniquify_tag_last(I<tag>, I<label>);
 
-Returns true if the message is a MIME message with Content-Type
-text/html and no alternatives.
+Deletes all occurrences of I<tag> except the last.
 
-=item $spam_flag = $sort->address_as_realname();
+=item $sort->dedupe(I<path>, I<keep>);
 
-Returns true if the message's headers contain an address that repeats
-the preceding Real Name, for example "foo123@spammers.com"
-<foo123@spammers.com>.
+This method is intended to approximate the functionality of "formail -D I<n> I<path>".
+Before using it for the first time, you should manually create a file I<path>.aux
+in the following format:
 
-=item $spam_flag = $sort->base64_text();
+I<high_water_mark> I<low_water_mark> 0
 
-Returns true if the message is a MIME message with Content-Type
-text/plain and Content-Transfer-Encoding base64.
-
-=item $spam_flag = $sort->missing_mimeole();
-
-Returns true if the message has a X-Msmail-Priority: header but no
-X-Mimeole: header.
-
-=item $spam_flag = $sort->msgid_spam_chars();
-
-Returns true if the message has a Message-Id: containing plainly
-invalid characters.
-
-=item $spam_flag = $sort->from_ends_in_digit();
-
-Returns true if the local part of the From: address ends in a digit
-character, for example "foo123@spammers.com".
-
-=item $spam_flag = $sort->razor_check();
-
-And now the great news!  I don't personally use any of the above
-methods, because Mail::Sort now includes support for Vipul's Razor - a
-collaborative stamping-out-spam initiative.  To get the big picture
-about Razor, please read its documentation.  The C<razor_check> method
-uses your existing Razor configuration to check the message digital
-signature against a Razor server's blacklist.
-
-Note that Mail::Sort doesn't I<depend> on Razor; the Razor modules are
-pulled in at runtime, and only if you actually call this method.
-
-=item $spam_hitlist_hash = $sort->spamassassin_check(); $superlong_score = $spam_hitlist_hash->{'SUPERLONG_LINE'};
-
-Continuing in the same spirit, spamassassin support has been added.
-This method returns a reference to a hash, where the hash keys are
-names of spamassassin tests (such as 'SUPERLONG_LINE') that have been
-hit, and the hash values are the corresponding scores spamassassin has
-assigned. 
+(a single line).  The first two numbers determine how many Message-Ids to remember.
+A new Message-Id will always be remembered; if the count of remembered Message-Ids
+reaches I<high_water_mark>, the oldest remembered Message-Ids are forgotten until
+the count drops to I<low_water_mark>.  If the Message-Id isn't new (i.e. it has
+already been remembered when this method is called), this method returns true
+or "successfully ignores" the message, according to the value of I<keep>.
 
 =back
 
@@ -501,29 +430,16 @@ assigned.
 
 =over
 
-=item $mail = $sort->{obj};
-
-The obj attribute is a reference to a L<Mail::Internet(3)> object that
-represents the original message.  After retrieving it you can apply
-any transformation to the message through the Mail::Internet
-interface, and then possibly create a new Mail::Sort object from the
-transformed message.
-
 =item @headers = @{$sort->{head}};
 
 The head attribute is a reference to an array of message headers.
-These headers are the ones used for the matching methods; they are
-I<unfolded> so that each header occupies exactly one line.  Therefore,
-they can be different from the original headers, and they shouldn't be
-used if you manually deliver or forward the message; use the obj
-attribute for that.
+These headers are the ones used for the matching methods.
 
 =item @body = @{$sort->{body}};
 
 The body attribute represents the message body.  It is a reference to
-an array of body lines.  In contrast to the head attribute, no
-transformation is applied to the body lines; in particular, no
-folding, unfolding, or From escaping.
+an array of body lines.  No transformation is applied to the body lines;
+in particular, no folding, unfolding, or From escaping.
 
 =item $from = $sort->{envelope_from};
 
@@ -539,9 +455,7 @@ F</dev/stderr> - default log file
 
 =head1 SEE ALSO
 
-L<procmail(1)>, L<procmailrc(5)>, L<Mail::Audit(3)>,
-L<Mail::Procmail(3)>, L<sendmail(8)>, L<Mail::Internet(3)>,
-L<Razor::Client(3)>, L<Razor::Config(3)>, L<Razor::String(3)>,
+L<procmail(1)>, L<procmailrc(5)>, L<sendmail(8)>, 
 L<open(2)>, L<fork(2)>, L<maildir(5)>, L<formail(1)>
 
 =head1 DIAGNOSTICS
@@ -625,20 +539,6 @@ trash your mail.
 
 =back
 
-
-There's currently no built-in way to set up bidirectional
-communication between the filter and a destination pipe, and thus no
-equivalent to B<procmail>'s :0 f: construct.  This can be done from
-the filter itself using L<IPC::Open2(3)>, but it would be nice to have
-a native API for it.  It will be added in a future version.
-
-What the Camel Book terms "Talking to yourself" is currently not
-possible, that is, the following won't work:
-
- $sort->deliver("|-", label => 'talking to myself');
-
-Some way of doing this will be provided in a future version.
-
 Mail::Sort has no built-in filename magic; there's no equivalent of
 B<procmail> constructs like ORGMAIL or MAILDIR.  The author considers
 this a feature.  In a general-purpose language like Perl, it is
@@ -653,7 +553,7 @@ either.
 
 =head1 AUTHOR
 
-Ian Zimmerman <S<itz@speakeasy.org>>
+Ian Zimmerman <S<itz@buug.org>>
 
 =head1 HISTORY
 

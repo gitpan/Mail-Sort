@@ -5,7 +5,11 @@ Makefile.PL
 README
 Sort.pod
 lib/Mail/Sort.pm
+lib/Mail/Sort/Dedupe.pm
+lib/Mail/Sort/Base.pm
+t/dedupe.t
 t/deliver.t
+t/filter.t
 t/headers.t
 t/lock.t
 t/log.t

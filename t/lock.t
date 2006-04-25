@@ -1,4 +1,4 @@
-#$Id: lock.t,v 1.2 2001/10/16 04:03:25 itz Exp $
+#$Id: lock.t 2 2006-02-18 04:34:40Z itz $
 
 use Test;
 

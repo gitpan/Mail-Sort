@@ -1,3 +1,54 @@
+<WARNING><WARNING><WARNING>
+
+This release is slightly incompatible with past ones.
+Although the API remains the same, the semantics of header matches
+has subtly changed.  They are now performed on the _original_ header
+of the incoming message, not on a sanitized (unfolded) copy of it.
+This is because it was very hard to come up with a clean way of
+allowing modifications to the original header (which was always
+the one to use for delivery) while keeping a separate copy for
+matching.
+
+Here's an example where the result is different.  Let's say the email
+header contain the following lines:
+
+Content-Type: text/plain;
+ charset="iso-8859-1"
+
+and assume it got slurped into $sort.  With past versions,
+
+$sort->header_match('content-type', '; charset')
+
+returned true; now it returns false.  This, however, still returns true
+
+$sort->header_match('content-type', ';\s+charset')
+
+and so does this
+
+$sort->header_match('content-type', ';\n charset')
+
+Also, header_match and all methods based on it now return a list of
+header _indices_ rather than the actual header text.  Most of the time
+the returned list list will have exactly one element, but may have more
+for repeated headers like Received.  The actual text of the matched header
+lines can be recovered with the new method get_header().  For instance,
+
+my @msg = (
+"Received: from foo\n",
+"To: myself\n",
+"Received: from bar\n",
+"\n",
+"Boo!\n"
+);
+
+my $sort = Mail::Sort->new (@msg);
+my @indices = $sort->header_match ('Received'); # now @indices is (0, 2)
+my @lines = $sort->get_header (@indices); 
+# now @lines is ("Received: from foo\n", "Received: from bar\n")
+
+</WARNING></WARNING></WARNING>
+
+
 Mail::Sort is yet another module intended to enable the writing of
 mail filters in the style of procmail(1). It was written when I
 realized that the previous entries (Mail::Audit(3) and
@@ -19,9 +70,3 @@ Mail::Sort is meant to end the history of this particular area by
 matching procmail's features 1-1.
 
 For distribution terms, read the file COPYING.
-
--- 
-Ian Zimmerman, Oakland, California, U.S.A.  <itz@speakeasy.org>
-The easiest way to win an argument: ridicule your opponent's basic
-assumptions by stating their negation and postfixing it with ", right?"
-GPG pub key: 433BA087 9C0F 194F 203A 63F7 B1B8 6E5A 8CA3 27DB 433B A087

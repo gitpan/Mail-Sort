@@ -1,14 +1,12 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         Mail-Sort
-version:      2006.02.15
-version_from: lib/Mail/Sort.pm
+version:      20060414
+version_from: 
 installdirs:  site
 requires:
     FileHandle:                    2.00
-    Mail::Header:                  1.19
-    Mail::Internet:                1.33
     POSIX:                         1.03
 
 distribution_type: module
-generated_by: ExtUtils::MakeMaker version 6.17
+generated_by: ExtUtils::MakeMaker version 6.30

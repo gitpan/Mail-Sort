@@ -1,8 +1,8 @@
-#$Id: log.t,v 1.3 2002/03/29 07:23:52 itz Exp $
+#$Id: log.t 18 2006-04-10 05:02:42Z itz $
 
 use Test;
 
-BEGIN { plan tests => 7 };
+BEGIN { plan tests => 5 };
 
 use Mail::Sort;
 use FileHandle 2.00;
@@ -40,19 +40,19 @@ if ($pid) {
     #some real logs now
 
     $sort->header_match('from', 'myself');
-    $sort->deliver("| cat >/dev/null", label => 'hmph', keep => 1);
-    $sort->forward("$ENV{LOGNAME}\@localhost", label => 'heck', keep => 1);
+#    $sort->deliver("| cat >/dev/null", label => 'hmph', keep => 1);
+#    $sort->forward("$ENV{LOGNAME}\@localhost", label => 'heck', keep => 1);
     $sort->ignore('barf');
 } else {
     #child
     my @logs = <STDIN>;
     my $pid = getppid();
     my $log_regexp = "^[A-Z][a-z][a-z]\\s+[0-9][0-9]\\s+[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\\s+\\[$pid\\]\\s+";
-    ok($#logs, 5);
+    ok($#logs, 3);
     ok($logs[0] =~ /${log_regexp}blah$/);
     ok($logs[1] =~ /${log_regexp}\(argh\)\s+eeek$/);
     ok($logs[2] =~ /${log_regexp}\(header match\)\s+$data[0]/);
-    ok($logs[3] =~ /${log_regexp}\(hmph\)\s+delivering\s+to\s+|\s+cat\s+>\/dev\/null$/);
-    ok($logs[4] =~ /${log_regexp}\(heck\)\s+(delivering|smtp forwarding)/);
-    ok($logs[5] =~ /${log_regexp}\(barf\)\s+delivering/);
+#    ok($logs[3] =~ /${log_regexp}\(hmph\)\s+delivering\s+to\s+|\s+cat\s+>\/dev\/null$/);
+#    ok($logs[4] =~ /${log_regexp}\(heck\)\s+(delivering|smtp forwarding)/);
+    ok($logs[3] =~ /${log_regexp}\(barf\)\s+delivering/);
 }
