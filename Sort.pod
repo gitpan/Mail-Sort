@@ -1,4 +1,4 @@
-# $Id: Sort.pod 21 2006-04-21 05:20:33Z itz $
+# $Id: Sort.pod 32 2007-03-20 23:40:04Z itz $
 =pod
 
 =head1 NAME
@@ -409,18 +409,13 @@ Deletes all occurrences of I<tag> except the first.
 
 Deletes all occurrences of I<tag> except the last.
 
-=item $sort->dedupe(I<path>, I<keep>);
+=item $sort->dedupe(I<path>, I<keep>, clean_period => I<clean_period>, ttl => I<ttl>);
 
 This method is intended to approximate the functionality of "formail -D I<n> I<path>".
-Before using it for the first time, you should manually create a file I<path>.aux
-in the following format:
-
-I<high_water_mark> I<low_water_mark> 0
-
-(a single line).  The first two numbers determine how many Message-Ids to remember.
-A new Message-Id will always be remembered; if the count of remembered Message-Ids
-reaches I<high_water_mark>, the oldest remembered Message-Ids are forgotten until
-the count drops to I<low_water_mark>.  If the Message-Id isn't new (i.e. it has
+I<ttl> determines how many messages to remember.  Each I<clean_period> (default:
+one day), this method scans all the remembered messages and forgets the ones older
+than I<ttl> (default: one week).
+If the message isn't new (i.e. it has
 already been remembered when this method is called), this method returns true
 or "successfully ignores" the message, according to the value of I<keep>.
 

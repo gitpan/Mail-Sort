@@ -1,3 +1,17 @@
+Tue Mar 20 12:35:47 EDT 2007
+
+The implementation of duplicate elimination (a la formail -D) has
+changed radically.  Formerly, I read the Message-Id header just like
+formail does, and used it as an index into a DB_File.  Unfortunately,
+there are many mail programs and systems (including unixoids) that
+create b0rk3d Message-Id headers, so I can't depend on it alone.
+
+Instead I string together From, Date and Message-Id if present and in
+that order.  One would like to use other bits of the message to further
+enhance uniqueness and guard against collisions, for instance the
+Subject and Lines headers (if present).  This fails because mailing
+lists modify messages in ways that change these bits.
+
 <WARNING><WARNING><WARNING>
 
 This release is slightly incompatible with past ones.

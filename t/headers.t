@@ -1,4 +1,4 @@
-#$Id: headers.t 18 2006-04-10 05:02:42Z itz $
+#$Id: headers.t 24 2006-10-19 04:49:31Z itz $
 
 use Test;
 

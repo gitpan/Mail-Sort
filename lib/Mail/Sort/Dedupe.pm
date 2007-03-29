@@ -1,58 +1,45 @@
-# $Id: Dedupe.pm 7 2006-02-18 16:00:01Z itz $
+# $Id: Dedupe.pm 33 2007-03-29 15:14:43Z itz $
 
 package Mail::Sort::Dedupe;
 
 @ISA = qw(Exporter);
 @EXPORT = qw(probe);
 
-use FileHandle 2.00;
-use DB_File 1.811;
+use File::Slurp;
+use DB_File;
 
-sub _read_aux_file {
-    my $auxpath = $_[0];
-    my $auxfh = FileHandle->new ("<$auxpath");
-    defined $auxfh or die "$auxpath: $!";
-    chomp, return split for ($auxfh->getline);
-}
-
-sub _write_aux_file {
-    my ($high_water, $low_water, $current, $first_id, $last_id, $auxpath) = @_;
-    my $auxfh = FileHandle->new (">$auxpath");
-    defined $auxfh or die "$auxpath: $!";
-    $auxfh->printf ("%d %d %d %s %s\n", $high_water, $low_water, $current,
-                    $first_id, $last_id);
-}
+use constant
+{
+    ONE_DAY => 60 * 60 * 24,
+    ONE_WEEK => 60 * 60 * 24 * 7,
+};
 
 sub probe {
-    my ($id, $path) = @_;
-    my ($auxpath, $dbpath, $found) = ($path . '.aux', $path . '.db', 0);
-    my ($high_water, $low_water, $current, $first_id, $last_id) =
-        _read_aux_file ($auxpath);
-    tie my %id_db, 'DB_File', $dbpath, O_CREAT|O_RDWR, 0600, $DB_HASH
-        or die "$dbpath: $!";
-    if ($current == 0) {
-        $id_db{$id} = $first_id = $last_id = $id;
-        $current = 1;
-    } 
-    elsif ($id_db{$id}) {
-        $found = 1;
-    } 
-    else {
-        $id_db{$last_id} = $id_db{$id} = $id;
-        $last_id = $id;
-        ++$current;
-    }
-    if ($current > $high_water) {
-        while ($current > $low_water) {
-            my $next_id = $id_db{$first_id};
-            delete $id_db{$first_id};
-            $first_id = $next_id;
-            --$current;
+    my ($id, $path) = splice(@_, 0, 2);
+    my %params = @_;
+    my ($clean_period, $ttl) = ($params{clean_period} || ONE_DAY, $params{ttl} || ONE_WEEK);
+    my $now = time;
+    mkdir ($path, 0700) || die "$!"
+        unless -d $path;
+    my $cleanfile = "$path/cleantime";
+    write_file ($cleanfile, $now + $clean_period) unless -e $cleanfile;
+    my $dbfile = "$path/db";
+    tie my %id_db, 'DB_File', $dbfile, O_CREAT|O_RDWR, 0600, $DB_HASH
+        or die "$dbfile: $!";
+    my $result = exists $id_db{$id};
+    $id_db{$id} = $now;
+    my $cleantime = read_file ($cleanfile);
+    chomp $cleantime;
+    if ($now > $cleantime) {
+        while (my ($k_id, $v_time) = each %id_db) {
+            delete $id_db{$k_id} if ((+$v_time + $ttl) < $now);
         }
+        $cleantime += $clean_period;
+        $cleantime = $now + $clean_period if ($cleantime <= $now);
+        write_file ($cleanfile, $cleantime);
     }
     untie %id_db;
-    _write_aux_file ($high_water, $low_water, $current, $first_id, $last_id, $auxpath);
-    return $found;
+    return $result;
 }
 
 1;

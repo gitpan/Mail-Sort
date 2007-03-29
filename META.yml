@@ -1,12 +1,14 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         Mail-Sort
-version:      20060414
+version:      20070329
 version_from: 
 installdirs:  site
 requires:
+    DB_File:                       1.814
+    File::Slurp:                   9999.09
     FileHandle:                    2.00
     POSIX:                         1.03
 
 distribution_type: module
-generated_by: ExtUtils::MakeMaker version 6.30
+generated_by: ExtUtils::MakeMaker version 6.30_01

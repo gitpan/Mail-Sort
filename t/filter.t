@@ -24,7 +24,7 @@ use Mail::Sort;
 
 $sort = new Mail::Sort(\@data, test => 1, logfile => '/dev/null');
 
-$sort->filter (['tail', '+5']);
+$sort->filter (['tail', '-n', '+5']);
 ok(scalar @{$sort->{head}}, 3);
 ok(scalar @{$sort->{body}}, 5);
 

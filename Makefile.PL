@@ -1,4 +1,4 @@
-# $Id: Makefile.PL 21 2006-04-21 05:20:33Z itz $
+# $Id: Makefile.PL 33 2007-03-29 15:14:43Z itz $
 
 use ExtUtils::MakeMaker;
 
@@ -11,12 +11,14 @@ our %pm_hash = ('lib/Mail/Sort.pm' => '$(INST_LIB)/Mail/Sort.pm',
 WriteMakefile(
 
               NAME                   => 'Mail::Sort',
-              VERSION           => '20060414',
+              VERSION           => '20070329',
               PREREQ_PM              => {
                   'FileHandle'       => '2.00',
                   'POSIX'            => '1.03',
+                  'File::Slurp'      => '9999.09',
+                  'DB_File'          => '1.814',
               },
               PM                     => \%pm_hash,
               MAN3PODS               => {'Sort.pod' => '$(INST_MAN3DIR)/Mail::Sort.3pm'},
-              realclean             => {FILES => '$(shell find . -name "*~")' },
+              realclean             => {FILES => '$(shell find . -name "*~" -o -name .svn)' },
               );

@@ -1,4 +1,4 @@
-# $Id: Base.pm 21 2006-04-21 05:20:33Z itz $
+# $Id: Base.pm 32 2007-03-20 23:40:04Z itz $
 
 package Mail::Sort::Base;
 
@@ -117,8 +117,8 @@ sub new {
 }
 
 sub _save_match {
-    my ($self, $line) = @_;
-    $self->log(3, $line, 'header match');
+    my ($self, $line, $level) = @_;
+    $self->log($level, $line, 'header match');
     my @matches = ( );
     for (my $i = 0; $i <= $#-; $i++) {
         $matches[$i] = substr($line, $-[$i], $+[$i] - $-[$i]) if defined $-[$i];
@@ -128,9 +128,10 @@ sub _save_match {
 }
 
 sub header_match {
-    my ($self, $tag, $pattern, $context) = @_;
+    my ($self, $tag, $pattern, $context, $level) = @_;
     defined $context or $context = '.*';
     defined $pattern or $pattern = '' ;
+    defined $level or $level = 3;
     if ($tag =~ m( [A-Z] )x) {
         $tag = '(?s)' . $tag;
     } else {
@@ -140,7 +141,7 @@ sub header_match {
     my @head = @{$self->{head}};
 
     $self->{all_matches} = [ ];
-    my @lines = grep { $head[$_] =~ $rx and &_save_match($self, $head[$_]) } (0..$#head);
+    my @lines = grep { $head[$_] =~ $rx and &_save_match($self, $head[$_], $level) } (0..$#head);
     $self->{matches} = $self->{all_matches}->[$#lines];
     @lines;
 }
@@ -473,12 +474,16 @@ sub uniquify_tag_last {
 }
 
 sub dedupe {
-    my ($self, $path, $keep) = @_;
-    return unless $self->header_match ('message-id', '(<[^\s>]+>)', '\s*');
-    my $msgid = ${$self->{matches}} [1];
+    my ($self, $path, $keep) = splice(@_, 0, 3);
+    my @id_headers = qw(from date message-id);
+    my $id = '';
+    for my $header (@id_headers) {
+        next unless $self->header_match($header);
+        $id .= $self->match_group(0);
+    }
     my $lockpath = $path . '.lock';
     $self->lock ($lockpath);
-    my $found = eval { probe ($msgid, $path) };
+    my $found = eval { probe ($id, $path, @_) };
     $self->unlock ($lockpath);
     $self->log (0, "$@"), die unless defined $found;
     $self->ignore ('dedupe match') if $found && !$keep;
