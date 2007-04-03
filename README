@@ -1,3 +1,11 @@
+Tue Apr  3 10:56:58 EDT 2007
+
+DB_File seems to be broken on *BSD systems; it's probably tied
+to the fact that libdb is part of libc rather than a stand-alone
+library, and probably frozen at an ancient version.  As a workaround,
+try to use GDBM instead on these systems.  Keep using DB on Linux
+and Solaris; I refuse to throw away my data because of a bug.
+
 Tue Mar 20 12:35:47 EDT 2007
 
 The implementation of duplicate elimination (a la formail -D) has

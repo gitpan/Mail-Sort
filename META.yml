@@ -1,13 +1,14 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         Mail-Sort
-version:      20070329
+version:      20070403
 version_from: 
 installdirs:  site
 requires:
     DB_File:                       1.814
     File::Slurp:                   9999.09
     FileHandle:                    2.00
+    GDBM_File:                     1.08
     POSIX:                         1.03
 
 distribution_type: module

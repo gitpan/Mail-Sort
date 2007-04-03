@@ -1,4 +1,4 @@
-# $Id: Dedupe.pm 33 2007-03-29 15:14:43Z itz $
+# $Id: Dedupe.pm 34 2007-04-03 15:06:27Z itz $
 
 package Mail::Sort::Dedupe;
 
@@ -6,6 +6,8 @@ package Mail::Sort::Dedupe;
 @EXPORT = qw(probe);
 
 use File::Slurp;
+use Config;
+use GDBM_File;
 use DB_File;
 
 use constant
@@ -24,8 +26,14 @@ sub probe {
     my $cleanfile = "$path/cleantime";
     write_file ($cleanfile, $now + $clean_period) unless -e $cleanfile;
     my $dbfile = "$path/db";
-    tie my %id_db, 'DB_File', $dbfile, O_CREAT|O_RDWR, 0600, $DB_HASH
-        or die "$dbfile: $!";
+    my %id_db = ();
+    if ($Config{osname} =~ /bsd|darwin/i) {
+        tie %id_db, 'GDBM_File', $dbfile, &GDBM_WRCREAT|&GDBM_NOLOCK, 0600
+            or die "$dbfile: $!";
+    } else {
+        tie %id_db, 'DB_File', $dbfile, O_CREAT|O_RDWR, 0600, $DB_HASH
+            or die "$dbfile: $!";
+    }
     my $result = exists $id_db{$id};
     $id_db{$id} = $now;
     my $cleantime = read_file ($cleanfile);
