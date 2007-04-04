@@ -1,4 +1,4 @@
-# $Id: Sort.pm 21 2006-04-21 05:20:33Z itz $
+# $Id: Sort.pm 36 2007-04-04 02:45:22Z itz $
 
 package Mail::Sort;
 
@@ -7,6 +7,8 @@ use Mail::Sort::Base;
 
 use strict;
 use v5.6.0;
+
+our $VERSION='20070404';
 
 # various junk matching recipes
 sub fake_received {

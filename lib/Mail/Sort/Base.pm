@@ -1,4 +1,4 @@
-# $Id: Base.pm 32 2007-03-20 23:40:04Z itz $
+# $Id: Base.pm 37 2007-04-04 03:37:09Z itz $
 
 package Mail::Sort::Base;
 
@@ -80,7 +80,7 @@ sub _copy_from_self {
 sub new {
     my $self = { };
     my $class = shift;
-    my %objkeys = map {$_, 1} qw(test logfile loglevel lockwait locktries callback envelope_from);
+    my %objkeys = map {$_, 1} qw(test logfile loglevel lockwait locktries callback envelope_from auto_dedupe);
 
     for (ref $_[0]) {
         /^Mail::Sort/     and &_copy_from_self($self, shift), last;
@@ -106,11 +106,12 @@ sub new {
     $self->{logfile} ||= '/dev/null';
     $self->{loglevel} ||= 1;
     $self->{lockwait} ||= 5;
-    $self->{locktries} ||= 10;
+    $self->{locktries} ||= 5;
     $self->{envelope_from} ||= "$ENV{LOGNAME}\@localhost";
     
     $self->{all_matches} = [ ];
     $self->{matches} = [ ];
+    $self->{delivered} = 0;
     $self->{_sendmail} = $sendmail;
     $self->{_signo} = \%signo;
     bless $self, $class;
@@ -203,6 +204,7 @@ sub log {
 sub lock {
     my ($self, $lockfile) = @_;
     my $lock;
+    my $current_wait = $self->{lockwait};
   CREAT:
     for (my $tries = 1; $tries <= $self->{locktries}; $tries++) {
         $lock = POSIX::open($lockfile, POSIX::O_CREAT|POSIX::O_EXCL, 0444);
@@ -212,7 +214,8 @@ sub lock {
             die "$!";
         }
         &{$self->{callback}}($lockfile, $tries) if $self->{callback};
-        sleep($self->{lockwait});
+        sleep($current_wait);
+        $current_wait += int($current_wait * (0.5 + rand));
     }
 
     if (!defined $lock) {
@@ -263,7 +266,7 @@ sub filter {
 
 sub deliver {
     my ($self, $target) = splice(@_, 0, 2);
-    my ($keep, $lockfile, $label, $mbox);
+    my ($keep, $lockfile, $label, $mbox, $db_lockfile, $probe_obj);
     $target =~ m( >>\s*(\S+) )x and $lockfile = $1 . '.lock';
 
   VAL:
@@ -279,13 +282,36 @@ sub deliver {
         }
     }
     
+    if ($self->{auto_dedupe} && !$self->{delivered}) {
+        my @id_headers = qw(from date message-id);
+        my $id = '';
+        for my $header (@id_headers) {
+            next unless $self->header_match($header);
+            $id .= $self->match_group(0);
+        }
+        $db_lockfile = $self->{auto_dedupe} . '.lock';
+        $self->lock ($db_lockfile);
+        my $found = eval {
+            $probe_obj = Mail::Sort::Dedupe->new (id => $id, path => $self->{auto_dedupe});
+            $probe_obj->probe_only;
+        };
+        $self->unlock ($db_lockfile), $self->log (0, "$@"), die unless defined $found;
+        if ($found) {
+            $self->unlock ($db_lockfile);
+            $target = '> /dev/null';
+            $label = 'dedupe match';
+            ($lockfile, $db_lockfile) = ();
+        }
+    }
+
     $self->log(2, "delivering to $target", $label);
     $self->lock($lockfile) if ($lockfile);
     my $fh = new FileHandle($target);
     if (!$fh) {
         $self->unlock ($lockfile) if $lockfile;
+        $self->unlock ($db_lockfile) if $db_lockfile;
         $self->log(0, "cannot deliver to $target: $!");
-        die "$!";
+        die "cannot deliver to $target: $!";
     }
     local $SIG{PIPE} = 'IGNORE'; # make sure to get status of fh->close() below
     local $?;
@@ -293,12 +319,20 @@ sub deliver {
     $status = eval { $self->_print_to_fh ($fh, $mbox) } unless $self->{test};
     $fh->close();
     $self->unlock ($lockfile) if $lockfile;
-    $self->log(0, "cannot deliver to $target: $!"), die unless $status;
+    if (!$status) {
+        $self->unlock ($db_lockfile) if $db_lockfile;
+        $self->log(0, "cannot deliver to $target: $!");
+        die "cannot deliver to $target: $!";
+    }
     if ($? and (not WIFSIGNALED($?) or WTERMSIG($?) != $self->{_signo}->{PIPE})) {
+        $self->unlock ($db_lockfile) if $db_lockfile;
         $self->log(0, "delivery subprocess exited with status $?");
         die "delivery subprocess exited with status $?";
     }
+    $probe_obj->record_only if $probe_obj;
+    $self->unlock ($db_lockfile) if $db_lockfile;
     exit 0 unless $keep;
+    $self->{delivered} = 1;
 }
 
 sub forward {

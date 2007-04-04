@@ -1,3 +1,29 @@
+Wed Apr  4 22:21:24 EDT 2007
+
+A bug existed in deduping that could have resulted in
+lost mail.  Namely: delivery process P1 probes, doesn't find message,
+goes on to other stuff, TEMPFAILs before actually delivering.  Delivery
+process P2, started later by MTA to deliver the same message, finds the
+message recorded by P1's probe and so drops it.  That looks like success
+to the MTA, so there'll be no further attempts and the message is lost.
+
+The only solution is to separate probing the database and updating it,
+such that the updating is only done after a successful delivery.
+That also means tighter integration of deduping with the core module;
+the probe must be done just before delivery, to avoid either keeping
+the database locked for too long (in effect forcing total serialization
+of deliveries and missing the opportunity for parallel deliveries to
+different mailboxes), or OTOH opening a window for a race where
+another delivery process sneaks in and delivers the mail after we've
+probed but before we've delivered.
+
+Note that formail -D has exactly the same problem.  I guess that's
+an indication that nobody ever uses it.  If you do, please report
+this to the procmail/formail maintainers, and consider switchng to
+Mail::Sort <grin>
+
+Exponential back-off added to locking delays.
+
 Tue Apr  3 10:56:58 EDT 2007
 
 DB_File seems to be broken on *BSD systems; it's probably tied

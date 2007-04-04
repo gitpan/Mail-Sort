@@ -6,6 +6,7 @@ BEGIN { plan tests => 16 * 3 + 3 };
 
 use Mail::Sort::Dedupe;
 use FileHandle;
+use File::Path;
 
 my @ids = qw(ait2cieKaeFa0phu QuaeR9usheiphang Adeekaey4uquim9i tath0vieZa7ushef
 ohfush3pooZee1zo haigoo5UceixaiKa Pee5Ohthohghee0b yi1aH7aitaeka6op
@@ -50,4 +51,4 @@ for my $i (16) {
     ok($found);
 }
 
-system ("rm -rf $test_d");
+rmtree ($test_d) if -d $test_d;

@@ -1,10 +1,11 @@
-#$Id: deliver.t 22 2006-04-21 05:21:00Z itz $
+#$Id: deliver.t 36 2007-04-04 02:45:22Z itz $
 
 use Test;
 
-BEGIN { plan tests => 17 };
+BEGIN { plan tests => 20 };
 
 use Mail::Sort;
+use File::Path;
 
 @data=(
        "From someone\@somewhere Thu Oct 25 16:23:40 2001\n",
@@ -15,6 +16,8 @@ use Mail::Sort;
        "To: you_vous_Vy\@nowhere.one.org\n",
        "Subject: deliver test\n",
        "Sender: my_own_list\@nowhere.two.org\n",
+       "Date: Sun, 01 Apr 2007 20:38:01 -0400\n",
+       "Message-ID: <akaeghoe6Uvu.mail-sort\@unicorn.ahiker.homeip.net>\n",
        "\n",
        ">From Myself, blah blah blah, this is a really stupid test message.\n",
        "Another line,\n",
@@ -84,6 +87,25 @@ unlink 'test5~';
 ok($#lines, $#data + 2);
 ok($lines[0] =~ /^From /);
 ok($lines[$#lines], "\n");
-ok(join('',@lines[1..8]), join('',@data[0..7]));
-ok($lines[9], '>' . $data[8]);
-ok(join('',@lines[10..$#data+1]), join('',@data[9..$#data]));
+ok(join('',@lines[1..10]), join('',@data[0..9]));
+ok($lines[11], '>' . $data[10]);
+ok(join('',@lines[12..$#data+1]), join('',@data[11..$#data]));
+
+#test deduping
+$dedupe_dir = "test.d." . `date +%Y%m%d%H%M%S`;
+chomp $dedupe_dir;
+$sort = new Mail::Sort(\@data, logfile => '/dev/null', loglevel => 4, auto_dedupe => $dedupe_dir);
+$sort->deliver(">test6~", keep => 1);
+$sort->deliver(">test7~", keep => 1);
+$sort = new Mail::Sort(\@data, logfile => '/dev/null', loglevel => 4, auto_dedupe => $dedupe_dir);
+$sort->deliver(">test8~", keep => 1);
+
+ok(-f 'test6~');
+ok(-f 'test7~');
+ok(not -f 'test8~');
+
+unlink('test6~');
+unlink('test7~');
+unlink('test8~');
+
+rmtree ($dedupe_dir) if -d $dedupe_dir;

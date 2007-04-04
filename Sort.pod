@@ -1,4 +1,4 @@
-# $Id: Sort.pod 32 2007-03-20 23:40:04Z itz $
+# $Id: Sort.pod 37 2007-04-04 03:37:09Z itz $
 =pod
 
 =head1 NAME
@@ -44,7 +44,7 @@ of mail filters in the style of L<procmail(1)>.
 
 =over
 
-=item $sort = new Mail::Sort(test => I<test>, logfile => I<logfile>, loglevel => I<loglevel>, lockwait => I<lockwait>, locktries => I<locktries>, callback => I<callback>, envelope_from => I<envelope_from>);
+=item $sort = new Mail::Sort(test => I<test>, logfile => I<logfile>, loglevel => I<loglevel>, lockwait => I<lockwait>, locktries => I<locktries>, callback => I<callback>, envelope_from => I<envelope_from>, auto_dedupe => <auto_dedupe>);
 
 creates a new Mail::Sort object after reading a mail message from
 F<stdin>.  I<test> is a boolean; when set, any delivery methods
@@ -71,13 +71,23 @@ are used by convention:
 
 =back
 
-I<lockwait> is the interval in seconds between retries while waiting
-for a lock to become available (default 5), and I<locktries> is the
-total number of retries before giving up (default 10).  I<callback>,
-if provided, should be a reference to a subroutine expecting 2
-arguments.  The subroutine will be called after each unsuccessful
-locking try, with the lockfile name and the number of tries so far as
-arguments.  
+I<lockwait> is the initial interval in seconds between retries while
+waiting for a lock to become available (default 5), and I<locktries> is
+the total number of retries before giving up (default 5).  Exponential
+back-off with randomness is used after the second try to avoid
+starvation scenarios.  I<callback>, if provided, should be a reference
+to a subroutine expecting 2 arguments.  The subroutine will be called
+after each unsuccessful locking try, with the lockfile name and the
+number of tries so far as arguments.
+
+If I<auto_dedupe> is defined, it is interpreted as the name of a
+directory where a database of all delivered mail is kept.  If the
+message passed to the constructor isn't new (i.e. it has already been
+remembered in the database), it will be delivered to F</dev/null>
+instead of any delivery that your calling filter script specifies.
+Because of concurrency considerations (see F<README> for the gory
+details), this check is B<not> done at construction time, but at
+delivery time (i.e. when deliver() is called, directly or indirectly).
 
 The constructor inspects the first line of the message to determine if
 it is in the 'From ' format traditionally used to delimit messages in
@@ -410,6 +420,10 @@ Deletes all occurrences of I<tag> except the first.
 Deletes all occurrences of I<tag> except the last.
 
 =item $sort->dedupe(I<path>, I<keep>, clean_period => I<clean_period>, ttl => I<ttl>);
+
+B<Warning:> This method is deprecated, instead use the auto_dedupe
+construction attribute, or use methods of the undocumented internal class
+Mail::Sort::Dedupe directly.
 
 This method is intended to approximate the functionality of "formail -D I<n> I<path>".
 I<ttl> determines how many messages to remember.  Each I<clean_period> (default:
